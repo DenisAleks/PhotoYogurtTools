@@ -1,0 +1,106 @@
+# =========================
+# Python
+# =========================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python packaging
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+
+# =========================
+# Environment / secrets
+# =========================
+
+.env
+.env.*
+!.env.example
+
+# =========================
+# macOS
+# =========================
+
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# =========================
+# IDEs / Editors
+# =========================
+
+.vscode/
+.idea/
+*.iml
+
+# =========================
+# Jupyter
+# =========================
+
+.ipynb_checkpoints/
+
+# =========================
+# Flet / generated files
+# =========================
+
+# Flet build output
+build/
+
+# Generated application files
+*.spec
+
+# =========================
+# Project-specific
+# =========================
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local photo/test data
+test_photos/
+test_images/
+photos/
+images/
+
+# Generated thumbnails / results
+thumbnails/
+output/
+results/
+
+# Local configuration
+config.local.*
+settings.local.*
