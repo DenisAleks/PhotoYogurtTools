@@ -2,10 +2,10 @@ import asyncio
 from pathlib import Path
 from typing import Callable, Optional
 
-from photorec.comparer.duplicate_finder import DuplicateFinder
-from photorec.comparer.duplicate_processor import DuplicateProcessor
-from photorec.comparer.original_index import OriginalIndex
-from photorec.scanner.file_scanner import ImageScanner
+from photorec.features.recovery.duplicate_finder import DuplicateFinder
+from photorec.features.recovery.duplicate_processor import DuplicateProcessor
+from photorec.features.recovery.original_index import OriginalIndex
+from photorec.shared.media_scanner import MediaScanner
 
 
 LogCallback = Callable[[str], None]
@@ -18,6 +18,7 @@ class PhotoRecoveryService:
         original_folder: str,
         recovered_folder: str,
         output_folder: str,
+        move_files: bool = False,
         log: Optional[LogCallback] = None,
         cancel_check: Optional[CancelCheck] = None,
     ) -> None:
@@ -25,13 +26,19 @@ class PhotoRecoveryService:
         self._recovered_folder = Path(recovered_folder)
         self._output_folder = Path(output_folder)
 
+        self._move_files = move_files
+
         self._log_callback = log
         self._cancel_check = cancel_check
 
     async def run(self) -> None:
+        self._log(
+            f"Mode: {'MOVE' if self._move_files else 'COPY'} files"
+        )
+
         self._log("Scanning original folder...")
 
-        scanner = ImageScanner(
+        scanner = MediaScanner(
             str(self._original_folder)
         )
 
@@ -82,7 +89,7 @@ class PhotoRecoveryService:
             f"Scanning recovered folder: {folder}"
         )
 
-        scanner = ImageScanner(str(folder))
+        scanner = MediaScanner(str(folder))
         recovered = scanner.scan()
 
         total = len(recovered)
@@ -101,6 +108,7 @@ class PhotoRecoveryService:
             finder=finder,
             originals_root=self._original_folder,
             output_root=self._output_folder,
+            move_files=self._move_files,
         )
 
         duplicates = 0
@@ -147,7 +155,7 @@ class PhotoRecoveryService:
                     await asyncio.sleep(0)
 
         finally:
-            self._log("SHIT")
+            self._log("Something goes wrong.")
 
         if self._is_cancelled():
             return

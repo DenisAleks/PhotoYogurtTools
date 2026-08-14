@@ -1,7 +1,7 @@
 import flet as ft
 
-from photorec.ui.app_header import create_app_header
-from photorec.ui.app_tabs import create_app_tabs
+from photorec.shell.app_header import create_app_header
+from photorec.shell.app_tabs import create_app_tabs
 
 
 class MainWindow:
@@ -25,10 +25,10 @@ class MainWindow:
     def _configure_page(self) -> None:
         self._page.title = "Photo Recovery Toolkit"
 
-        self._page.window.width = 1000
-        self._page.window.height = 760
-        self._page.window.min_width = 850
-        self._page.window.min_height = 650
+        self._page.window.width = 1240
+        self._page.window.height = 960
+        self._page.window.min_width = 950
+        self._page.window.min_height = 720
 
         self._page.padding = 0
 

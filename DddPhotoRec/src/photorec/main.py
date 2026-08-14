@@ -1,5 +1,5 @@
 import flet as ft
-from photorec.ui.main_window import MainWindow
+from photorec.shell.main_window import MainWindow
 
 
 def main(page: ft.Page) -> None:

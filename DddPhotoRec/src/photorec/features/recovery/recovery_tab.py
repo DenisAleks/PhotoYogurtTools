@@ -2,19 +2,19 @@ from typing import Optional
 
 import flet as ft
 
-from photorec.ui.my_file_picker import select_folder
-from photorec.ui.folder_card import (
+from photorec.shared.file_picker import select_folder
+from photorec.shared.folder_card import (
     create_folder_card,
 )
-from photorec.utils.photo_recovery_service import (
+from photorec.features.recovery.service import (
     PhotoRecoveryService,
 )
 
 
 class PhotoRecoveryTab:
     def __init__(
-        self,
-        page: ft.Page,
+            self,
+            page: ft.Page,
     ) -> None:
         self._page = page
 
@@ -67,6 +67,11 @@ class PhotoRecoveryTab:
             cursor_color=ft.Colors.BLUE_300,
         )
 
+        self._move_files_switch = ft.Switch(
+            value=False,
+            active_color=ft.Colors.INDIGO_400,
+        )
+
         self._cancel_button = ft.ElevatedButton(
             text="Cancel",
             disabled=True,
@@ -82,7 +87,7 @@ class PhotoRecoveryTab:
         )
 
         self._analyze_button = ft.ElevatedButton(
-            text="Analyze",
+            text="Process files",
             disabled=True,
             on_click=self._on_analyze_clicked,
             height=44,
@@ -123,11 +128,11 @@ class PhotoRecoveryTab:
         )
 
     def _create_select_button(
-        self,
-        text: str,
-        color: str,
-        background: str,
-        on_click,
+            self,
+            text: str,
+            color: str,
+            background: str,
+            on_click,
     ) -> ft.Control:
         return ft.ElevatedButton(
             text=text,
@@ -209,6 +214,30 @@ class PhotoRecoveryTab:
                     ),
 
                     ft.Row(
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            self._move_files_switch,
+                            ft.Column(
+                                spacing=1,
+                                controls=[
+                                    ft.Text(
+                                        "Move files instead of copying",
+                                        size=13,
+                                        color=ft.Colors.GREY_200,
+                                    ),
+                                    ft.Text(
+                                        "When on, matched files are removed from "
+                                        "the recovered folder. Off = safe copy.",
+                                        size=11,
+                                        color=ft.Colors.GREY_500,
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+
+                    ft.Row(
                         spacing=10,
                         controls=[
                             self._analyze_button,
@@ -260,8 +289,8 @@ class PhotoRecoveryTab:
     # ==================================================================
 
     def _on_select_original_clicked(
-        self,
-        _: ft.ControlEvent,
+            self,
+            _: ft.ControlEvent,
     ) -> None:
         folder = select_folder()
 
@@ -278,8 +307,8 @@ class PhotoRecoveryTab:
         self._update_state()
 
     def _on_select_recovered_clicked(
-        self,
-        _: ft.ControlEvent,
+            self,
+            _: ft.ControlEvent,
     ) -> None:
         folder = select_folder()
 
@@ -296,8 +325,8 @@ class PhotoRecoveryTab:
         self._update_state()
 
     def _on_select_output_clicked(
-        self,
-        _: ft.ControlEvent,
+            self,
+            _: ft.ControlEvent,
     ) -> None:
         folder = select_folder()
 
@@ -317,14 +346,12 @@ class PhotoRecoveryTab:
     # ANALYSIS
     # ==================================================================
 
-    def _on_analyze_clicked(
-        self,
-        _: ft.ControlEvent,
-    ) -> None:
+    def _on_analyze_clicked(self, _: ft.ControlEvent, ) -> None:
         self._cancel_requested = False
 
         self._analyze_button.disabled = True
         self._cancel_button.disabled = False
+        self._move_files_switch.disabled = True
 
         self._page.update()
 
@@ -333,8 +360,8 @@ class PhotoRecoveryTab:
         )
 
     def _on_cancel_clicked(
-        self,
-        _: ft.ControlEvent,
+            self,
+            _: ft.ControlEvent,
     ) -> None:
         self._cancel_requested = True
 
@@ -348,6 +375,7 @@ class PhotoRecoveryTab:
                 original_folder=self._original_folder,
                 recovered_folder=self._recovered_folder,
                 output_folder=self._output_folder,
+                move_files=self._move_files_switch.value,
                 log=self._add_log,
                 cancel_check=lambda: self._cancel_requested,
             )
@@ -362,6 +390,7 @@ class PhotoRecoveryTab:
         finally:
             self._analyze_button.disabled = False
             self._cancel_button.disabled = True
+            self._move_files_switch.disabled = False
 
             self._page.update()
 
@@ -370,13 +399,13 @@ class PhotoRecoveryTab:
     # ==================================================================
 
     def _add_log(
-        self,
-        message: str,
+            self,
+            message: str,
     ) -> None:
         print(message)
 
         self._log_field.value += (
-            message + "\n"
+                message + "\n"
         )
 
         self._log_field.cursor_position = (
@@ -391,9 +420,9 @@ class PhotoRecoveryTab:
 
     def _update_state(self) -> None:
         self._analyze_button.disabled = not (
-            self._original_folder
-            and self._recovered_folder
-            and self._output_folder
+                self._original_folder
+                and self._recovered_folder
+                and self._output_folder
         )
 
         self._page.update()

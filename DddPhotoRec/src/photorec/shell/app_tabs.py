@@ -1,13 +1,17 @@
 import flet as ft
 
-from photorec.ui.future_tab import create_future_tab
-from photorec.ui.recovery_tab import (
+from photorec.shared.future_tab import create_future_tab
+from photorec.features.recovery.recovery_tab import (
     PhotoRecoveryTab,
+)
+from photorec.features.renamer.renamer_tab import (
+    RenamerTab,
 )
 
 
 def create_app_tabs(page: ft.Page) -> ft.Control:
     recovery_tab = PhotoRecoveryTab(page)
+    renamer_tab = RenamerTab(page)
 
     return ft.Tabs(
         selected_index=0,
@@ -27,10 +31,7 @@ def create_app_tabs(page: ft.Page) -> ft.Control:
             ft.Tab(
                 text="Photo & Video Renamer",
                 icon=ft.Icons.DRIVE_FILE_RENAME_OUTLINE,
-                content=create_future_tab(
-                    "Photo & Video Renamer",
-                    "This tool will rename photos and videos using their creation date and time.",
-                ),
+                content=renamer_tab.build(),
             ),
 
             ft.Tab(

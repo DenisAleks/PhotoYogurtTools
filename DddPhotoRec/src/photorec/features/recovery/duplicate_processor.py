@@ -2,7 +2,7 @@ from csv import DictWriter
 from pathlib import Path
 import shutil
 
-from photorec.comparer.duplicate_finder import DuplicateFinder
+from photorec.features.recovery.duplicate_finder import DuplicateFinder
 
 
 class DuplicateProcessor:
@@ -12,7 +12,7 @@ class DuplicateProcessor:
         finder: DuplicateFinder,
         originals_root: Path,
         output_root: Path,
-        move_files: bool = False,  # TODO set true when ready to work with real images
+        move_files: bool = False,  # toggled from the UI; copy is the safe default
     ) -> None:
 
         self._move_files = move_files

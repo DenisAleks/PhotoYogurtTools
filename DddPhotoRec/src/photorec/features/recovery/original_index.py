@@ -1,8 +1,8 @@
 from collections import defaultdict
 from pathlib import Path
 
-from photorec.models.file_info import FileInfo
-from photorec.utils.hash_calculator import HashCalculator
+from photorec.features.recovery.models import FileInfo
+from photorec.features.recovery.hash_calculator import HashCalculator
 
 
 class OriginalIndex:
