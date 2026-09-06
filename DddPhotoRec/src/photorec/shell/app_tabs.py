@@ -1,17 +1,20 @@
 import flet as ft
 
-from photorec.shared.future_tab import create_future_tab
 from photorec.features.recovery.recovery_tab import (
     PhotoRecoveryTab,
 )
 from photorec.features.renamer.renamer_tab import (
     RenamerTab,
 )
+from photorec.features.duplicates.duplicates_tab import (
+    DuplicatesTab,
+)
 
 
 def create_app_tabs(page: ft.Page) -> ft.Control:
     recovery_tab = PhotoRecoveryTab(page)
     renamer_tab = RenamerTab(page)
+    duplicates_tab = DuplicatesTab(page)
 
     return ft.Tabs(
         selected_index=0,
@@ -37,10 +40,7 @@ def create_app_tabs(page: ft.Page) -> ft.Control:
             ft.Tab(
                 text="Duplicates Finder",
                 icon=ft.Icons.CONTENT_COPY_OUTLINED,
-                content=create_future_tab(
-                    "Duplicates Finder",
-                    "This tool will find duplicate files inside your photo folders.",
-                ),
+                content=duplicates_tab.build(),
             ),
         ],
     )

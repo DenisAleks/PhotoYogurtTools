@@ -52,13 +52,17 @@ class PhotoRecoveryService:
             self._log("Cancelled.")
             return
 
-        self._log("Building hash index...")
+        self._log("Indexing library (image pixels + video bytes)...")
 
         index = OriginalIndex()
-        index.build(original_files)
+        await index.build(
+            original_files,
+            log=self._log,
+            cancel_check=self._is_cancelled,
+        )
 
         self._log(
-            f"Indexed originals: {index.count}"
+            f"Indexed library signatures: {index.count}"
         )
 
         if self._is_cancelled():
@@ -112,62 +116,71 @@ class PhotoRecoveryService:
         )
 
         duplicates = 0
-        unique = 0
+        unique_new = 0
+        unique_same_size = 0
 
-        try:
-            for i, file in enumerate(
-                recovered,
-                start=1,
-            ):
-                if self._is_cancelled():
-                    self._log(
-                        f"Cancelled at {i - 1}/{total}."
-                    )
-                    return
+        for i, file in enumerate(
+            recovered,
+            start=1,
+        ):
+            if self._is_cancelled():
+                self._log(
+                    f"Cancelled at {i - 1}/{total}."
+                )
+                return
 
-                original = finder.find_original(file)
+            result = finder.find_original(file)
 
-                if original is None:
-                    unique += 1
-
-                    processor.process_unique(
-                        recovered=file,
-                        recovered_root=folder,
-                    )
-
+            if result.original is None:
+                # Same dimensions but no pixel match ⇒ likely a re-compressed
+                # or edited version, not a genuinely new photo.
+                if result.had_dimension_match:
+                    unique_same_size += 1
                 else:
-                    duplicates += 1
+                    unique_new += 1
 
-                    processor.process_duplicate(
-                        recovered=file,
-                        original=original,
-                    )
+                processor.process_unique(
+                    recovered=file,
+                    recovered_root=folder,
+                )
 
-                if i % 100 == 0 or i == total:
-                    self._log(
-                        f"Progress: {i}/{total} "
-                        f"({i / total * 100:.1f}%) | "
-                        f"duplicates={duplicates}, "
-                        f"recovered={unique}"
-                    )
+            else:
+                duplicates += 1
 
-                    # Give the event loop a chance to breathe.
-                    await asyncio.sleep(0)
+                processor.process_duplicate(
+                    recovered=file,
+                    original=result.original,
+                )
 
-        finally:
-            self._log("Something goes wrong.")
+            if i % 100 == 0 or i == total:
+                self._log(
+                    f"Progress: {i}/{total} "
+                    f"({i / total * 100:.1f}%) | "
+                    f"duplicates={duplicates}, "
+                    f"recovered={unique_new + unique_same_size}"
+                )
+
+                # Give the event loop a chance to breathe.
+                await asyncio.sleep(0)
 
         if self._is_cancelled():
             return
 
         self._log("")
         self._log("Folder finished")
-        self._log(
-            f"Duplicates : {duplicates}"
-        )
-        self._log(
-            f"Recovered  : {unique}"
-        )
+        self._log(f"Duplicates (same image content)          : {duplicates}")
+        self._log(f"Recovered - genuinely new                : {unique_new}")
+        self._log(f"Recovered - same dimensions, diff pixels : {unique_same_size}")
+
+        if unique_same_size > 0:
+            self._log("")
+            self._log(
+                f"NOTE: {unique_same_size} 'recovered' file(s) share a library "
+                "photo's dimensions but have different pixels — likely "
+                "re-compressed or edited versions. Exact pixel matching keeps "
+                "these as new (matching them would need fuzzy/perceptual "
+                "matching)."
+            )
 
     def _is_cancelled(self) -> bool:
         if self._cancel_check is None:

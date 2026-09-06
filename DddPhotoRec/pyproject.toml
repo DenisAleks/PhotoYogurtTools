@@ -1,11 +1,13 @@
 [project]
 name = "photorec"
 version = "0.1.0"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "flet[all]==0.28.3",
     "jpegio>=0.2.8",
     "pillow>=11.3.0",
+    "pillow-heif>=0.16.0",
+    "reverse-geocode>=1.6",
 ]
 
 [build-system]
