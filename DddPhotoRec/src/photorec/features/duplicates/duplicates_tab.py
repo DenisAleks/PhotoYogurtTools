@@ -60,8 +60,20 @@ class DuplicatesTab:
             ),
         )
 
+        self._move_button = ft.ElevatedButton(
+            text="Move to DUP folder",
+            disabled=True,
+            on_click=self._on_move_clicked,
+            height=44,
+            style=ft.ButtonStyle(
+                color=ft.Colors.GREEN_200,
+                bgcolor=ft.Colors.GREEN_900,
+                shape=ft.RoundedRectangleBorder(radius=10),
+            ),
+        )
+
         self._rename_button = ft.ElevatedButton(
-            text="Rename duplicates",
+            text="Rename in place",
             disabled=True,
             on_click=self._on_rename_clicked,
             height=44,
@@ -133,9 +145,10 @@ class DuplicatesTab:
                     ),
 
                     ft.Text(
-                        "Find byte-identical files in a folder and its "
-                        "subfolders. Scan is read-only; Rename flags copies in "
-                        "place with a _dup_ suffix — nothing is ever deleted.",
+                        "Find identical photos & videos in a folder and its "
+                        "subfolders (images by pixel content). Scan is read-only; "
+                        "then move copies to a DUP/ folder (mirroring structure) "
+                        "or flag them with a DUP_ prefix — nothing is deleted.",
                         size=13,
                         color=ft.Colors.GREY_500,
                     ),
@@ -153,6 +166,7 @@ class DuplicatesTab:
                         spacing=10,
                         controls=[
                             self._scan_button,
+                            self._move_button,
                             self._rename_button,
                             self._undo_button,
                             self._cancel_button,
@@ -238,6 +252,36 @@ class DuplicatesTab:
             self._groups = groups
             self._applied = False
             self._last_operations = []
+
+        except Exception as error:
+            self._add_log(f"ERROR: {error}")
+
+        finally:
+            self._set_running(False)
+
+    # ==================================================================
+    # MOVE TO DUP FOLDER
+    # ==================================================================
+
+    def _on_move_clicked(self, _: ft.ControlEvent) -> None:
+        self._cancel_requested = False
+        self._set_running(True)
+
+        self._page.run_task(self._run_move)
+
+    async def _run_move(self) -> None:
+        try:
+            service = DuplicatesService(
+                input_folder=self._input_folder,
+                log=self._add_log,
+                cancel_check=lambda: self._cancel_requested,
+            )
+
+            operations = await service.move_to_dup_folder(self._groups)
+
+            if operations:
+                self._last_operations = operations
+                self._applied = True
 
         except Exception as error:
             self._add_log(f"ERROR: {error}")
@@ -332,10 +376,11 @@ class DuplicatesTab:
     def _update_buttons(self) -> None:
         ready = bool(self._input_folder)
 
+        can_apply = not (self._running or self._applied or not self._groups)
+
         self._scan_button.disabled = self._running or not ready
-        self._rename_button.disabled = (
-            self._running or self._applied or not self._groups
-        )
+        self._move_button.disabled = not can_apply
+        self._rename_button.disabled = not can_apply
         self._undo_button.disabled = (
             self._running or not self._last_operations
         )

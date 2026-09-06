@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set
 
-from photorec.features.recovery.image_signature import (
+from photorec.shared.image_signature import (
     Dimensions,
     image_signature,
     is_image,

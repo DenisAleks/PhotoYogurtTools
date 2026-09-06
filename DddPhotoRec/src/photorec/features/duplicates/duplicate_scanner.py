@@ -5,46 +5,130 @@ from typing import Callable, Dict, List, Optional
 
 from photorec.features.duplicates.models import DuplicateGroup
 from photorec.shared.hash_calculator import HashCalculator
+from photorec.shared.image_signature import (
+    image_signature,
+    is_image,
+    read_dimensions,
+)
 
 
 CancelCheck = Callable[[], bool]
-LogCallback = Callable[[str], None]
+LogCallback = Callable[[], None]
 
 
 class DuplicateScanner:
-    """Finds byte-identical files via a size -> quick-hash -> full-hash funnel.
+    """Finds duplicate media files within one folder.
 
-    Each stage only reads files that survived the previous one, so unique files
-    are never fully read - important for large libraries.
+    - Images are matched by **decoded pixel content**, so copies that differ
+      only in padding or EXIF still group together. A cheap dimensions pass
+      filters candidates before the expensive decode.
+    - Videos are matched by **exact bytes** via a size -> quick-hash ->
+      full-hash funnel (pixels can't be cheaply decoded).
     """
 
     def __init__(
         self,
         cancel_check: Optional[CancelCheck] = None,
-        log: Optional[LogCallback] = None,
+        log: Optional[Callable[[str], None]] = None,
     ) -> None:
         self._cancel_check = cancel_check
         self._log = log or (lambda _msg: None)
         self._hash = HashCalculator()
 
     async def scan(self, files: List[Path]) -> List[DuplicateGroup]:
-        by_size = self._group_by_size(files)
+        images = [f for f in files if is_image(f)]
+        videos = [f for f in files if not is_image(f)]
+
+        self._log(f"Images: {len(images)} · Videos: {len(videos)}")
+
+        groups: List[DuplicateGroup] = []
+        groups += await self._scan_images(images)
+        groups += await self._scan_videos(videos)
+
+        # Biggest reclaimable space first.
+        groups.sort(key=lambda g: g.reclaimable_bytes, reverse=True)
+
+        return groups
+
+    # ------------------------------------------------------------------
+    # IMAGES (pixel content)
+    # ------------------------------------------------------------------
+
+    async def _scan_images(
+        self,
+        images: List[Path],
+    ) -> List[DuplicateGroup]:
+        if not images:
+            return []
+
+        # Stage 1: cheap dimensions pass (no decode).
+        by_dimensions: Dict[object, List[Path]] = defaultdict(list)
+        total = len(images)
+
+        for i, file in enumerate(images, start=1):
+            if self._is_cancelled():
+                return []
+
+            dimensions = read_dimensions(file)
+
+            if dimensions is not None:
+                by_dimensions[dimensions].append(file)
+
+            if i % 200 == 0 or i == total:
+                self._log(f"Reading image sizes: {i}/{total}")
+                await asyncio.sleep(0)
+
+        candidates = self._collision_candidates(by_dimensions)
+        self._log(f"Same-dimension image candidates: {len(candidates)}")
+
+        if not candidates:
+            return []
+
+        # Stage 2: decode + pixel-hash only the candidates.
+        by_pixels: Dict[str, List[Path]] = defaultdict(list)
+        total = len(candidates)
+
+        for i, file in enumerate(candidates, start=1):
+            if self._is_cancelled():
+                return []
+
+            _dimensions, signature = image_signature(file)
+
+            if signature is not None:
+                by_pixels[signature].append(file)
+
+            if i % 50 == 0 or i == total:
+                self._log(f"Hashing image pixels: {i}/{total}")
+                await asyncio.sleep(0)
+
+        return self._build_groups(by_pixels)
+
+    # ------------------------------------------------------------------
+    # VIDEOS (exact bytes)
+    # ------------------------------------------------------------------
+
+    async def _scan_videos(
+        self,
+        videos: List[Path],
+    ) -> List[DuplicateGroup]:
+        if not videos:
+            return []
+
+        by_size: Dict[int, List[Path]] = defaultdict(list)
+
+        for file in videos:
+            try:
+                by_size[file.stat().st_size].append(file)
+            except OSError:
+                continue
 
         size_candidates = self._collision_candidates(by_size)
-        self._log(
-            f"Same-size candidates: {len(size_candidates)} "
-            f"(of {len(files)} files)"
-        )
 
         if not size_candidates:
             return []
 
         by_quick = await self._group_by_quick_hash(size_candidates)
-
         quick_candidates = self._collision_candidates(by_quick)
-        self._log(
-            f"Quick-hash candidates: {len(quick_candidates)}"
-        )
 
         if not quick_candidates:
             return []
@@ -52,21 +136,6 @@ class DuplicateScanner:
         by_full = await self._group_by_full_hash(quick_candidates)
 
         return self._build_groups(by_full)
-
-    # ------------------------------------------------------------------
-    # STAGES
-    # ------------------------------------------------------------------
-
-    def _group_by_size(self, files: List[Path]) -> Dict[int, List[Path]]:
-        buckets: Dict[int, List[Path]] = defaultdict(list)
-
-        for file in files:
-            try:
-                buckets[file.stat().st_size].append(file)
-            except OSError:
-                continue
-
-        return buckets
 
     async def _group_by_quick_hash(
         self,
@@ -80,7 +149,6 @@ class DuplicateScanner:
                 return buckets
 
             try:
-                # Key by size too, so different sizes never collide.
                 digest = self._hash.calculate_partial(file)
                 key = f"{file.stat().st_size}:{digest}"
                 buckets[key].append(file)
@@ -88,7 +156,7 @@ class DuplicateScanner:
                 pass
 
             if i % 200 == 0 or i == total:
-                self._log(f"Quick hashing: {i}/{total}")
+                self._log(f"Quick hashing videos: {i}/{total}")
                 await asyncio.sleep(0)
 
         return buckets
@@ -109,44 +177,45 @@ class DuplicateScanner:
             if digest is not None:
                 buckets[digest].append(file)
 
-            if i % 50 == 0 or i == total:
-                self._log(f"Full hashing: {i}/{total}")
+            if i % 20 == 0 or i == total:
+                self._log(f"Full hashing videos: {i}/{total}")
                 await asyncio.sleep(0)
 
         return buckets
 
+    # ------------------------------------------------------------------
+    # HELPERS
+    # ------------------------------------------------------------------
+
     def _build_groups(
         self,
-        by_hash: Dict[str, List[Path]],
+        by_signature: Dict[str, List[Path]],
     ) -> List[DuplicateGroup]:
         groups: List[DuplicateGroup] = []
 
-        for digest, members in by_hash.items():
+        for signature, members in by_signature.items():
             if len(members) < 2:
                 continue
 
             ordered = sorted(members, key=self._file_time)
 
             keeper = ordered[0]
-            duplicates = ordered[1:]
+
+            try:
+                size = keeper.stat().st_size
+            except OSError:
+                size = 0
 
             groups.append(
                 DuplicateGroup(
-                    hash=digest,
-                    size=keeper.stat().st_size,
+                    hash=signature,
+                    size=size,
                     keeper=keeper,
-                    duplicates=duplicates,
+                    duplicates=ordered[1:],
                 )
             )
 
-        # Biggest reclaimable space first.
-        groups.sort(key=lambda g: g.reclaimable_bytes, reverse=True)
-
         return groups
-
-    # ------------------------------------------------------------------
-    # HELPERS
-    # ------------------------------------------------------------------
 
     def _collision_candidates(
         self,

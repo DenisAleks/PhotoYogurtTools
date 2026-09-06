@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from photorec.features.recovery.image_signature import (
+from photorec.shared.image_signature import (
     image_signature,
     is_image,
 )

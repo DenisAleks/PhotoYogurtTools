@@ -6,7 +6,11 @@ from typing import Callable, List, Optional, Set, Tuple
 
 from photorec.features.duplicates.duplicate_scanner import DuplicateScanner
 from photorec.features.duplicates.models import DuplicateGroup
-from photorec.features.duplicates.naming import flagged_name, is_flagged
+from photorec.features.duplicates.naming import (
+    DUP_FOLDER_NAME,
+    flagged_name,
+    is_flagged,
+)
 from photorec.features.duplicates.report_writer import ReportWriter
 from photorec.shared.media_scanner import MediaScanner
 from photorec.shared.rename_ops import RenameOperation
@@ -44,6 +48,12 @@ class DuplicatesService:
         self._log(f"Scanning: {self._input_folder}")
 
         files = MediaScanner(str(self._input_folder)).scan()
+
+        # Ignore anything already inside the DUP folder, so previously-moved
+        # duplicates aren't re-detected against their keepers.
+        dup_root = self._input_folder / DUP_FOLDER_NAME
+        files = [f for f in files if dup_root not in f.parents]
+
         self._log(f"Media files found: {len(files)}")
 
         if not files:
@@ -98,7 +108,7 @@ class DuplicatesService:
                     continue
 
                 destination = duplicate.with_name(
-                    flagged_name(duplicate, group.keeper)
+                    flagged_name(duplicate)
                 )
 
                 destination = self._avoid_collision(destination, planned)
@@ -131,8 +141,75 @@ class DuplicatesService:
         return operations
 
     # ------------------------------------------------------------------
+    # MOVE TO DUP FOLDER (explicit second step)
+    # ------------------------------------------------------------------
+
+    async def move_to_dup_folder(
+        self,
+        groups: List[DuplicateGroup],
+    ) -> List[RenameOperation]:
+        dup_root = self._input_folder / DUP_FOLDER_NAME
+
+        self._log("")
+        self._log(f"Moving duplicates into {DUP_FOLDER_NAME}/ ...")
+
+        operations: List[RenameOperation] = []
+        planned: Set[Path] = set()
+
+        moved = 0
+        skipped = 0
+
+        total_groups = len(groups)
+
+        for i, group in enumerate(groups, start=1):
+            if self._is_cancelled():
+                self._log(f"Cancelled at group {i - 1}/{total_groups}.")
+                break
+
+            for duplicate in group.duplicates:
+                destination = self._dup_destination(duplicate, dup_root)
+                destination = self._avoid_collision(destination, planned)
+
+                if destination == duplicate:
+                    skipped += 1
+                    continue
+
+                planned.add(destination)
+
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(duplicate), str(destination))
+
+                operations.append(
+                    RenameOperation(
+                        source=duplicate,
+                        target=destination,
+                    )
+                )
+
+                moved += 1
+
+            if i % 50 == 0 or i == total_groups:
+                await asyncio.sleep(0)
+
+        self._log("")
+        self._log("Move finished")
+        self._log(f"Moved   : {moved}  (into {DUP_FOLDER_NAME}/)")
+        self._log(f"Skipped : {skipped}")
+
+        return operations
+
+    # ------------------------------------------------------------------
     # INTERNAL
     # ------------------------------------------------------------------
+
+    def _dup_destination(self, duplicate: Path, dup_root: Path) -> Path:
+        # Mirror the file's path relative to the input folder under DUP/.
+        try:
+            relative = duplicate.relative_to(self._input_folder)
+        except ValueError:
+            relative = Path(duplicate.name)
+
+        return dup_root / relative
 
     def _write_report(
         self,
@@ -179,10 +256,7 @@ class DuplicatesService:
             self._log(f"    keep · {group.keeper.name}")
 
             for duplicate in group.duplicates:
-                self._log(
-                    f"    dup  · {duplicate.name}  ->  "
-                    f"{flagged_name(duplicate, group.keeper)}"
-                )
+                self._log(f"    dup  · {duplicate.name}")
 
         hidden = len(groups) - _LOG_GROUP_CAP
 

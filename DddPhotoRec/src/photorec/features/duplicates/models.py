@@ -21,5 +21,15 @@ class DuplicateGroup:
 
     @property
     def reclaimable_bytes(self) -> int:
-        # Space that could be freed by removing the redundant copies.
-        return self.size * len(self.duplicates)
+        # Space freed by removing the redundant copies. Summed from each file's
+        # actual size, since pixel-identical images can differ in byte size
+        # (padding, EXIF) and so aren't necessarily `self.size` each.
+        total = 0
+
+        for duplicate in self.duplicates:
+            try:
+                total += duplicate.stat().st_size
+            except OSError:
+                continue
+
+        return total

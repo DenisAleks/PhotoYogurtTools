@@ -25,6 +25,19 @@ def is_image(file: Path) -> bool:
     return file.suffix.lower() in IMAGE_EXTENSIONS
 
 
+def read_dimensions(file: Path) -> Optional[Dimensions]:
+    """(width, height, mode) from the header — no pixel decode (cheap).
+
+    Two images can only share pixels if they share dimensions, so this is a
+    cheap first-pass filter before the expensive `image_signature` decode.
+    """
+    try:
+        with Image.open(file) as image:
+            return image.width, image.height, image.mode
+    except Exception:
+        return None
+
+
 def image_signature(
     file: Path,
 ) -> Tuple[Optional[Dimensions], Optional[str]]:
@@ -32,9 +45,8 @@ def image_signature(
 
     The hash is SHA-256 of the *decoded pixel data*, so it ignores the file
     container, trailing padding, and EXIF metadata — two files with identical
-    pixels hash the same even if their raw bytes differ (exactly the case for
-    recovered photos vs their library copies). Returns (None, None) if the file
-    can't be read as an image.
+    pixels hash the same even if their raw bytes differ. Returns (None, None)
+    if the file can't be read as an image.
     """
     try:
         with Image.open(file) as image:

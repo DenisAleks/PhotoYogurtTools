@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import List
 
 from photorec.features.duplicates.models import DuplicateGroup
-from photorec.features.duplicates.naming import flagged_name
 
 
 class ReportWriter:
@@ -30,8 +29,9 @@ class ReportWriter:
             f"- **Redundant files:** {redundant:,}",
             f"- **Reclaimable space:** {self._human(reclaimable)}",
             "",
-            "> The keeper (oldest file) is left untouched. Each duplicate is "
-            "renamed in place; nothing is deleted. Delete by hand after review.",
+            "> The keeper (oldest file) is left untouched. Duplicates can be "
+            "flagged with a `DUP_` prefix or moved into a `DUP/` folder; nothing "
+            "is deleted. Delete by hand after review.",
             "",
             "---",
             "",
@@ -71,7 +71,6 @@ class ReportWriter:
         for duplicate in group.duplicates:
             lines.append(
                 f"- 🔁 dup  · `{self._relative(duplicate, input_folder)}`"
-                f"  →  `{flagged_name(duplicate, group.keeper)}`"
             )
 
         lines.append("")
