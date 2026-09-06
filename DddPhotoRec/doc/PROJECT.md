@@ -17,7 +17,10 @@ timestamps, or folder structure.
 
 The app is a **toolkit** — a tabbed desktop UI hosting several media utilities.
 Beyond recovery it also renames & sorts a library by capture date (see
-[The Renamer](#the-renamer-photo--video-renamer-tab)).
+[The Renamer](#the-renamer-photo--video-renamer-tab)) and finds duplicates.
+
+> 🇷🇺 На русском: [PROJECT.ru.md](PROJECT.ru.md). New to the app? Jump to
+> [How to use each tab](#how-to-use-each-tab-plain-guide).
 
 ---
 
@@ -32,6 +35,87 @@ Beyond recovery it also renames & sorts a library by capture date (see
 - Recovery **copies** files by default; a UI toggle switches it to move mode.
   The Renamer **moves** files in place and offers an **Undo** button as its
   safety net (see [Safety notes](#safety-notes)).
+
+---
+
+## How to use each tab (plain guide)
+
+The app has three tools, one per tab. **Nothing here ever deletes your files** —
+the worst case is a copy or a rename you can undo. Every tab has a **log panel**
+at the bottom that shows what is happening while it works.
+
+### 📸 Tab 1 — Photo Recovery
+
+**What it's for.** After you rescue photos from a broken or formatted disk (with
+a tool like PhotoRec), you get one big messy folder. Many of those photos you
+*already have* in your normal library. This tab sorts the recovered photos into
+"already have it" vs "genuinely new".
+
+**You choose three folders:**
+- **ORIGINAL** — your existing, tidy photo library (what you already own).
+- **RECOVERED** — the messy folder the recovery tool produced.
+- **OUTPUT** — an empty folder where the sorted results are written.
+
+**Steps:**
+1. Click each *Select … folder* button and pick the folder.
+2. *(Optional)* turn on **"Move files instead of copying"** to move recovered
+   files instead of copying them. Off (the default) is safe — it only copies.
+3. Click **Process files** and watch the log.
+
+**What you get in OUTPUT:**
+- `duplicates/…` — recovered photos you already had in your library.
+- `recovered/…` — genuinely new photos worth keeping.
+
+**Good to know.** Photos are matched by their **actual image**, not the raw file,
+so a recovered copy still matches even if the recovery tool padded it or stripped
+its date info.
+
+### 🗂️ Tab 2 — Photo & Video Renamer
+
+**What it's for.** Turns messy names like `IMG_1234.HEIC` into clean, date-based
+names and sorts them into year/month folders — e.g.
+`2024/10/2024-10-05_14-30-22.heic`.
+
+**Steps:**
+1. Click **Select INPUT folder** — the folder of photos/videos to tidy.
+2. Pick a **naming pattern** from the dropdown, or type your own. The
+   **Example** line shows exactly how a file will be named.
+3. Click **Rename all**.
+4. Not happy? Click **Undo last rename**.
+
+**Where the date comes from.** The photo's real capture date (from its metadata),
+or a date found in the filename, or the file's own date — in that order.
+
+**Optional place name.** If your pattern includes `{loc}`, the city where a photo
+was taken is added to the name (read from the photo's GPS, **fully offline**).
+Photos without GPS just leave it out.
+
+**Good to know.** Files are **moved** into the new date folders inside the same
+folder. Undo puts them back (until you close the app).
+
+### 🔍 Tab 3 — Duplicates Finder
+
+**What it's for.** Finds duplicate photos/videos **inside one folder** (and its
+subfolders) — the same picture saved several times. Nothing is deleted; you
+decide what to remove.
+
+**Steps:**
+1. Click **Select INPUT folder**.
+2. Click **Scan for duplicates** — this only *looks*, it changes nothing. It
+   writes a `.md` report into the folder and lists the duplicate groups in the log.
+3. Then choose one action:
+   - **Move to DUP folder** *(recommended)* — moves the extra copies into a
+     `DUP/` folder that mirrors your folder structure, so you can browse, compare,
+     and delete them together.
+   - **Rename in place** — adds a `DUP_` prefix to the extra copies so you can
+     spot and search them.
+4. **Undo** reverses the last action.
+
+**Which copy is kept?** The **oldest** file in each group is left untouched; the
+newer copies are the ones flagged or moved.
+
+**Good to know.** Photos are compared by their **actual image**, so exact copies
+are caught even when their file sizes differ slightly (padding, edited metadata).
 
 ---
 
@@ -66,7 +150,9 @@ DddPhotoRec/
 ├── pyproject.toml            # project metadata + dependencies
 ├── uv.lock                   # locked dependency versions (uv)
 ├── doc/
-│   └── PROJECT.md            # this document
+│   ├── PROJECT.md            # this document
+│   ├── PROJECT.ru.md         # Russian translation of this document
+│   └── RUN_ON_WINDOWS.md     # step-by-step Windows + VS Code setup
 └── src/photorec/
     ├── main.py               # Flet entry point
     │
@@ -81,13 +167,13 @@ DddPhotoRec/
     │   ├── file_picker.py    # native folder dialog via Tkinter subprocess
     │   ├── media_scanner.py  # MediaScanner + image/video extension sets
     │   ├── hash_calculator.py# HashCalculator: full + partial SHA-256
+    │   ├── image_signature.py# decode image → pixel hash (+ dimensions)
     │   └── rename_ops.py     # RenameOperation + undo_operations()
     │
     └── features/
         ├── recovery/         # ← the Photo Recovery tab, in one folder
         │   ├── recovery_tab.py       # the tab's Flet UI
         │   ├── service.py            # PhotoRecoveryService: orchestrates a run
-        │   ├── image_signature.py    # decode image → pixel hash (+ dimensions)
         │   ├── original_index.py     # OriginalIndex: content-signature index
         │   ├── duplicate_finder.py   # DuplicateFinder: content match → MatchResult
         │   └── duplicate_processor.py# DuplicateProcessor: copy/move into output
@@ -101,11 +187,11 @@ DddPhotoRec/
         │   └── name_builder.py       # pattern tokens → folder/filename
         │
         └── duplicates/       # ← the Duplicates Finder tab
-            ├── duplicates_tab.py     # UI: input folder, Scan/Rename/Undo, log
+            ├── duplicates_tab.py     # UI: Scan / Move / Rename / Undo, log
             ├── service.py            # DuplicatesService: scan (read-only) + rename
-            ├── duplicate_scanner.py  # size → quick-hash → full-hash funnel
+            ├── duplicate_scanner.py  # images by pixels, videos by byte funnel
             ├── report_writer.py      # the Markdown report
-            ├── naming.py             # _dup_ suffix + already-flagged detection
+            ├── naming.py             # DUP_ prefix, DUP/ folder, flag detection
             └── models.py             # DuplicateGroup
 ```
 
@@ -260,55 +346,59 @@ or close the app.
 
 ## The Duplicates Finder
 
-Finds **byte-identical** files anywhere under one input folder and flags the
-redundant copies **in place** — it never deletes or moves anything, so you stay
-the final judge. Deliberately two-step:
+Finds duplicate files anywhere under one input folder and flags the redundant
+copies — it never deletes anything, so you stay the final judge. Deliberately
+two-step:
 
 1. **Scan** (read-only) → finds duplicate groups, fills the log, and writes a
    Markdown report. Touches nothing.
-2. Review, then **Rename duplicates** (a separate, explicit click) → applies a
-   `_dup_` suffix to the redundant copies.
-3. **Undo** reverses the last rename batch (shared `undo_operations`).
+2. Review, then pick one of two explicit actions:
+   - **Move to DUP folder** (recommended) → relocates each duplicate to
+     `DUP/<same relative path>`, so all copies collect in one browsable tree that
+     mirrors the original structure (the keeper sits at the matching path outside
+     `DUP/`). The `DUP/` folder is skipped on future scans, so it's idempotent.
+   - **Rename in place** → prepends a `DUP_` prefix to each duplicate.
+3. **Undo** reverses the last action (shared `undo_operations`, works for both).
 
-### Detection funnel (correct + scalable)
-`DuplicateScanner.scan()` narrows candidates in three stages so unique files are
-never fully read — important for large libraries:
+### How matches are decided
+`DuplicateScanner.scan()` splits files by type and uses the same content logic as
+the Recovery tab, so copies that differ only in padding or EXIF still group:
 
-1. **Group by size** — a unique size can't have a duplicate; dropped unread.
-2. **Quick hash** (first 64 KB, `HashCalculator.calculate_partial`) within each
-   size group — cheap, eliminates most non-matches.
-3. **Full SHA-256** only on files that still collide → confirmed groups.
+- **Images → decoded pixel content.** A cheap **dimensions** pass
+  (`read_dimensions`, no decode) buckets candidates first; only same-dimension
+  groups are decoded and **pixel-hashed** (`image_signature`). Two images match
+  when their pixels are identical, regardless of byte differences.
+- **Videos → exact bytes**, via a size → quick-hash (64 KB) → full-SHA-256 funnel
+  so unique videos are never fully read.
 
-Groups are sorted by reclaimable space (biggest first). Runs async with progress
-logging and Cancel.
+Groups are sorted by reclaimable space (biggest first, summed from each
+duplicate's actual byte size). Runs async with progress logging and Cancel.
 
-### Keeper & the `_dup_` suffix
+### Keeper & flagging
 In each group the **oldest** file (earliest `st_birthtime`/`st_mtime`) is the
-**keeper** and is left untouched. Every other copy is renamed:
-
-`b/IMG_5678.jpg` (copy of keeper `a/IMG_1234.jpg`) → `b/IMG_5678_dup_IMG_1234.jpg`
-
-So `{dup-stem}_dup_{keeper-stem}{ext}` (`naming.flagged_name`). Searching `_dup_`
-lists every flagged file, and the name says what it duplicates. Files already
-containing `_dup_` are skipped, so re-running is idempotent; clashes get `_1`…
+**keeper** and is left untouched; the other copies are flagged. The `DUP_` prefix
+(`naming.flagged_name`) is used rather than an infix marker because Finder/Explorer
+truncate long names in the middle (`start…end.ext`), which would hide an infix —
+a prefix stays visible. Files already prefixed `DUP_`, and anything already inside
+the `DUP/` folder, are skipped, so both actions are idempotent; name clashes get
+`_1`, `_2`…
 
 ### The report
 `ReportWriter` saves `_DUPLICATES_REPORT_<date>_<time>.md` in the input folder:
 a summary header (files scanned, groups, redundant count, reclaimable space) and
-one section per group listing the keeper and each duplicate with its planned new
-name. The on-screen log mirrors this but caps at the first 100 groups (the report
-always holds all of them).
+one section per group listing the keeper and each duplicate path. The on-screen
+log mirrors this but caps at the first 100 groups (the report always holds all).
 
 ### Key components
 
 | Component | Responsibility |
 |-----------|----------------|
-| `DuplicateScanner` | size → quick-hash → full-hash → `DuplicateGroup[]`. |
-| `DuplicateGroup`   | A hash-identical set: keeper + duplicates + size. |
+| `DuplicateScanner` | images by pixel content, videos by byte funnel → `DuplicateGroup[]`. |
+| `DuplicateGroup`   | A content-identical set: keeper + duplicates; reclaimable size. |
 | `ReportWriter`     | Renders the Markdown report. |
-| `naming`           | `_dup_` suffix + already-flagged detection. |
-| `DuplicatesService`| Orchestrates scan (read-only) and rename (explicit). |
-| `DuplicatesTab`    | The Flet UI: input folder, Scan/Rename/Undo/Cancel, log. |
+| `naming`           | `DUP_` prefix, `DUP/` folder name, already-flagged detection. |
+| `DuplicatesService`| Scan (read-only), rename-in-place, and move-to-`DUP/` (all explicit). |
+| `DuplicatesTab`    | The Flet UI: input folder, Scan / Move / Rename / Undo / Cancel, log. |
 
 ---
 
@@ -347,8 +437,9 @@ button stays disabled until all three folders are selected.
   read-only diagnostics log.
 - **Renamer tab** (`renamer_tab.py`) — one INPUT folder card, a preset dropdown +
   pattern field + live preview, and Rename/Undo/Cancel buttons over a log.
-- **Duplicates tab** (`duplicates_tab.py`) — one INPUT folder card,
-  Scan/Rename/Undo/Cancel buttons, and a large log (the report holds the rest).
+- **Duplicates tab** (`duplicates_tab.py`) — one INPUT folder card, and
+  Scan / Move to DUP folder / Rename in place / Undo / Cancel buttons over a
+  large log (the report holds the rest).
 - **Folder picker** (`shared/file_picker.py`) — spawns a separate Python process
   that opens a native Tkinter directory dialog (defaulting to `~/Downloads`) and
   returns the chosen path over stdout. Running it out-of-process avoids mixing
@@ -381,12 +472,8 @@ button stays disabled until all three folders are selected.
 
 These are visible in the current source and worth cleaning up:
 
-- `features/recovery/service.py` logs the literal string `"SHIT"` in a `finally`
-  block — leftover debug output that should be removed or made meaningful.
-- There is no hash caching, so every run re-reads and re-hashes files. A
-  persistent cache (keyed by path + size + mtime) would speed up repeated runs.
-- `OriginalIndex.build()` ignores the `progress` callback for the hashing phase
-  (only the sizing phase reports progress).
+- There is no hash/signature caching, so every run re-reads and re-hashes files.
+  A persistent cache (keyed by path + size + mtime) would speed up repeated runs.
 - `jpegio` is declared but unused so far.
 - `shared/future_tab.py` is now unused (all three tabs are real) — kept for reuse.
 - Recovery matches images by **exact pixels**, so re-compressed / resized copies
