@@ -12,6 +12,9 @@ from photorec.features.duplicates.duplicates_tab import (
 from photorec.features.compressor.compressor_tab import (
     CompressorTab,
 )
+from photorec.features.video.video_tab import (
+    VideoCompressorTab,
+)
 
 
 def create_app_tabs(page: ft.Page) -> ft.Control:
@@ -19,6 +22,7 @@ def create_app_tabs(page: ft.Page) -> ft.Control:
     renamer_tab = RenamerTab(page)
     duplicates_tab = DuplicatesTab(page)
     compressor_tab = CompressorTab(page)
+    video_tab = VideoCompressorTab(page)
 
     return ft.Tabs(
         selected_index=0,
@@ -51,6 +55,12 @@ def create_app_tabs(page: ft.Page) -> ft.Control:
                 text="Photo Compressor",
                 icon=ft.Icons.COMPRESS,
                 content=compressor_tab.build(),
+            ),
+
+            ft.Tab(
+                text="Video Compressor",
+                icon=ft.Icons.MOVIE_OUTLINED,
+                content=video_tab.build(),
             ),
         ],
     )

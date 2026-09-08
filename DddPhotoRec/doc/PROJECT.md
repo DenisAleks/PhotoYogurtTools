@@ -34,6 +34,8 @@ Beyond recovery it also renames & sorts a library by capture date (see
   - **Duplicates Finder** — functional (scan → report → flag in place, with Undo).
   - **Photo Compressor** — functional (shrink to a target size into OUTPUT; convert
     HEIC/HEIF/PNG → JPEG; originals untouched, videos skipped).
+  - **Video Compressor** — functional (re-encode to H.264 .mp4 in place with
+    _Backup/; optional 720p downscale above a size threshold; per-file progress).
 - Recovery **copies** files by default; a UI toggle switches it to move mode.
   The Renamer **moves** files in place and offers an **Undo** button as its
   safety net (see [Safety notes](#safety-notes)).
@@ -42,7 +44,7 @@ Beyond recovery it also renames & sorts a library by capture date (see
 
 ## How to use each tab (plain guide)
 
-The app has four tools, one per tab. **Nothing here ever deletes your files** —
+The app has five tools, one per tab. **Nothing here ever deletes your files** —
 the worst case is a copy or a rename you can undo. Every tab has a **log panel**
 at the bottom that shows what is happening while it works.
 
@@ -145,8 +147,33 @@ target without going below a safe quality floor, it's kept at the best quality i
 can and noted in the log.
 
 **Good to know.** Capture date, GPS, and orientation are preserved. **Videos are
-skipped** entirely. HEIC is already efficient, so converting it to JPEG is mainly
-for compatibility — the big space savings come from large JPEGs and PNGs.
+skipped** entirely (compress those in the Video Compressor tab). HEIC is already
+efficient, so converting it to JPEG is mainly for compatibility — the big space
+savings come from large JPEGs and PNGs.
+
+### 🎬 Tab 5 — Video Compressor
+
+**What it's for.** Re-encodes videos (e.g. iPhone HEVC `.mov`) to **H.264 `.mp4`**
+so they play everywhere (Windows included) and take less space — **without
+changing resolution** by default. Works on a whole folder in the background.
+
+**Steps:**
+1. Click **Select INPUT folder**.
+2. Pick a **Quality** (High / Medium / Strong — higher quality = bigger file).
+3. *(Optional)* turn on **"Downscale very large videos to 720p"** and choose the
+   **size threshold** — only files larger than that are shrunk to 720p (aspect
+   ratio kept); everything else keeps its resolution.
+4. Click **Compress**. Two progress bars show the **current file** and the
+   **overall** batch.
+
+**How it works.** Videos are replaced **in place**; each original is moved to
+`_Backup/` first (your safety net). A video is only replaced if the result is
+actually smaller. Capture date and rotation are preserved.
+
+**Good to know.** Only videos are touched (photos and other files are ignored).
+Encoding is CPU-heavy and runs one file at a time; **Cancel** stops it. HEVC is
+more efficient than H.264, so H.264 is chosen for **compatibility** — most iPhone
+clips still shrink because they're recorded at a high bitrate.
 
 ---
 
@@ -158,10 +185,11 @@ for compatibility — the big space savings come from large JPEGs and PNGs.
 | GUI            | [Flet](https://flet.dev) `0.28.3` (desktop app)   |
 | Hashing        | `hashlib.sha256` (stdlib)                          |
 | Photo metadata | Pillow EXIF + `pillow-heif` (HEIC)                 |
+| Video encoding | FFmpeg via `imageio-ffmpeg` (bundled static binary) |
 | Geocoding      | `reverse-geocode` (offline, on-device)            |
 | Folder picker  | Tkinter `filedialog`, launched as a subprocess    |
 | Build backend  | Hatchling                                          |
-| Declared deps  | `flet[all]`, `pillow`, `pillow-heif`, `reverse-geocode` |
+| Declared deps  | `flet[all]`, `pillow`, `pillow-heif`, `reverse-geocode`, `imageio-ffmpeg` |
 
 > `pillow` / `pillow-heif` read capture date-time and GPS from photos;
 > `reverse-geocode` turns GPS into a place name **offline** (coordinates never
@@ -224,10 +252,15 @@ DddPhotoRec/
         │   ├── naming.py             # DUP_ prefix, DUP/ folder, flag detection
         │   └── models.py             # DuplicateGroup
         │
-        └── compressor/       # ← the Photo Compressor tab
-            ├── compressor_tab.py     # UI: INPUT/OUTPUT, convert toggle, target
-            ├── service.py            # CompressorService: per-image → OUTPUT
-            └── encoder.py            # JPEG re-encode to a size target (keeps EXIF)
+        ├── compressor/       # ← the Photo Compressor tab
+        │   ├── compressor_tab.py     # UI: INPUT/OUTPUT, convert toggle, target
+        │   ├── service.py            # CompressorService: per-image → OUTPUT
+        │   └── encoder.py            # JPEG re-encode to a size target (keeps EXIF)
+        │
+        └── video/            # ← the Video Compressor tab
+            ├── video_tab.py          # UI: INPUT, quality, 720p+threshold, 2 bars
+            ├── service.py            # VideoCompressorService: in-place + _Backup
+            └── ffmpeg_runner.py      # locate ffmpeg, encode H.264, parse progress
 ```
 
 > **Shared, not cross-imported:** features depend on `shared/` (scanner, hashing,
@@ -538,6 +571,43 @@ subfolder that held only a video becomes empty after the move); re-runs are safe
 
 ---
 
+## The Video Compressor
+
+Re-encodes videos to **H.264 `.mp4`** in place (originals → `_Backup/`), for
+compatibility (plays on Windows) and size. Photos and other files are ignored;
+videos are the only target.
+
+### Encoding (`ffmpeg_runner`)
+There is no pure-Python video encoder, so this uses **FFmpeg**. `imageio-ffmpeg`
+ships a static binary (`get_ffmpeg_exe()`), so nothing is installed system-wide
+and it packages into the `.exe`. `encode_h264()`:
+
+- encodes `libx264` at a **CRF** (constant quality: High/Medium/Strong → 20/23/26)
+  — quality-driven, not size-driven;
+- keeps resolution, unless downscaling is on **and** the file is over the size
+  threshold, then caps height at 720p (`scale=-2:min(720,ih)`, never upscales);
+- copies the audio stream losslessly and preserves metadata/rotation
+  (`-map_metadata 0`, `-movflags +faststart`);
+- runs ffmpeg as an **async subprocess**, parsing `-progress` output against the
+  clip duration to report **per-file progress** (0..1); **Cancel kills ffmpeg**.
+
+### Per-file decision (`VideoCompressorService`)
+Sequential (video encoding already saturates the CPU). For each video: encode to
+a temp file, then keep it **only if it's smaller** than the original — if so, the
+original is moved to `_Backup/<relative path>` and the `.mp4` takes its place;
+otherwise the original is left untouched. Two progress signals are reported: an
+**overall** `progress(done, total)` (files) and a **per-file** fraction.
+
+### Key components
+
+| Component | Responsibility |
+|-----------|----------------|
+| `encode_h264` | Run ffmpeg to H.264/mp4 at a CRF; optional 720p; per-file progress; cancellable. |
+| `VideoCompressorService` | Scan videos, encode in place with `_Backup/`, report overall + per-file progress. |
+| `VideoCompressorTab` | The Flet UI: INPUT, quality, 720p toggle + size threshold, two progress bars. |
+
+---
+
 ## Running the app
 
 The project uses [uv](https://docs.astral.sh/uv/) (an `uv.lock` is committed).
@@ -555,7 +625,7 @@ pip install -e .
 python -m photorec.main
 ```
 
-A desktop window opens with four tabs. For recovery, use the **Photo Recovery**
+A desktop window opens with five tabs. For recovery, use the **Photo Recovery**
 tab, pick the three folders, and press **Process files** (the button stays
 disabled until all three folders are selected).
 
@@ -569,6 +639,7 @@ disabled until all three folders are selected).
   - *Photo & Video Renamer* — working feature (rename + date-sort, Undo).
   - *Duplicates Finder* — working feature (scan → report → flag, Undo).
   - *Photo Compressor* — working feature (shrink to target, convert to JPEG).
+  - *Video Compressor* — working feature (H.264 in place, optional 720p).
 - **Recovery tab** (`recovery_tab.py`) — three folder cards (ORIGINAL /
   RECOVERED / OUTPUT), a move/copy toggle, Process/Cancel buttons, and a
   read-only diagnostics log.
@@ -580,9 +651,13 @@ disabled until all three folders are selected).
 - **Compressor tab** (`compressor_tab.py`) — INPUT/OUTPUT folder cards, a
   target-size dropdown, "convert to JPEG" and "compress in place" toggles,
   Compress/Cancel, and a log.
+- **Video tab** (`video_tab.py`) — INPUT folder card, quality dropdown, a 720p
+  toggle + size-threshold dropdown, Compress/Cancel, **two** progress bars
+  (current file + overall), and a log.
 
 All long-running tabs also show a **progress bar** (driven by a `progress(done,
-total)` callback the services report; the bar hides when idle).
+total)` callback the services report; the bar hides when idle). The Video tab
+adds a second bar for the current file's encode progress.
 - **Folder picker** (`shared/file_picker.py`) — spawns a separate Python process
   that opens a native Tkinter directory dialog (defaulting to `~/Downloads`) and
   returns the chosen path over stdout. Running it out-of-process avoids mixing
@@ -626,4 +701,7 @@ These are visible in the current source and worth cleaning up:
 - **Undo** (Renamer + Duplicates) does not survive app restart — no on-disk
   journal yet. Videos are dated from filename/filesystem only (no video-metadata
   library).
+- The Video Compressor has **no Undo** — its safety net is the `_Backup/` folder.
+  It bundles a static **ffmpeg** binary (`imageio-ffmpeg`), which adds ~30–70 MB
+  to a packaged `.exe`; verify the binary is included when packaging.
 ```
