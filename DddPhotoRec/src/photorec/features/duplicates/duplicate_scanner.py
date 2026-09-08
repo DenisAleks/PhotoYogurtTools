@@ -14,6 +14,7 @@ from photorec.shared.image_signature import (
 
 CancelCheck = Callable[[], bool]
 LogCallback = Callable[[], None]
+ProgressCallback = Callable[[int, int], None]
 
 
 class DuplicateScanner:
@@ -30,10 +31,16 @@ class DuplicateScanner:
         self,
         cancel_check: Optional[CancelCheck] = None,
         log: Optional[Callable[[str], None]] = None,
+        progress: Optional[ProgressCallback] = None,
     ) -> None:
         self._cancel_check = cancel_check
         self._log = log or (lambda _msg: None)
+        self._progress = progress
         self._hash = HashCalculator()
+
+    def _report(self, done: int, total: int) -> None:
+        if self._progress is not None:
+            self._progress(done, total)
 
     async def scan(self, files: List[Path]) -> List[DuplicateGroup]:
         images = [f for f in files if is_image(f)]
@@ -76,6 +83,7 @@ class DuplicateScanner:
 
             if i % 200 == 0 or i == total:
                 self._log(f"Reading image sizes: {i}/{total}")
+                self._report(i, total)
                 await asyncio.sleep(0)
 
         candidates = self._collision_candidates(by_dimensions)
@@ -99,6 +107,7 @@ class DuplicateScanner:
 
             if i % 50 == 0 or i == total:
                 self._log(f"Hashing image pixels: {i}/{total}")
+                self._report(i, total)
                 await asyncio.sleep(0)
 
         return self._build_groups(by_pixels)
@@ -157,6 +166,7 @@ class DuplicateScanner:
 
             if i % 200 == 0 or i == total:
                 self._log(f"Quick hashing videos: {i}/{total}")
+                self._report(i, total)
                 await asyncio.sleep(0)
 
         return buckets
@@ -179,6 +189,7 @@ class DuplicateScanner:
 
             if i % 20 == 0 or i == total:
                 self._log(f"Full hashing videos: {i}/{total}")
+                self._report(i, total)
                 await asyncio.sleep(0)
 
         return buckets

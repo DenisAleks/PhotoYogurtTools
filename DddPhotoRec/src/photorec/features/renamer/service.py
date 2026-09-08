@@ -12,6 +12,7 @@ from photorec.shared.rename_ops import RenameOperation, undo_operations
 
 LogCallback = Callable[[str], None]
 CancelCheck = Callable[[], bool]
+ProgressCallback = Callable[[int, int], None]
 
 
 class RenamerService:
@@ -28,12 +29,14 @@ class RenamerService:
         pattern: str,
         log: Optional[LogCallback] = None,
         cancel_check: Optional[CancelCheck] = None,
+        progress: Optional[ProgressCallback] = None,
     ) -> None:
         self._input_folder = Path(input_folder)
         self._pattern = pattern
 
         self._log_callback = log
         self._cancel_check = cancel_check
+        self._progress = progress
 
         self._resolver = DateResolver()
         self._builder = NameBuilder()
@@ -88,6 +91,8 @@ class RenamerService:
                 )
 
                 renamed += 1
+
+            self._report(i, total)
 
             if i % 50 == 0 or i == total:
                 self._log(
@@ -159,6 +164,10 @@ class RenamerService:
                 return candidate
 
             counter += 1
+
+    def _report(self, done: int, total: int) -> None:
+        if self._progress is not None:
+            self._progress(done, total)
 
     def _is_cancelled(self) -> bool:
         if self._cancel_check is None:

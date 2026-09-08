@@ -18,6 +18,7 @@ from photorec.shared.rename_ops import RenameOperation
 
 LogCallback = Callable[[str], None]
 CancelCheck = Callable[[], bool]
+ProgressCallback = Callable[[int, int], None]
 
 # How many groups to print to the on-screen log (the .md report holds all).
 _LOG_GROUP_CAP = 100
@@ -35,10 +36,12 @@ class DuplicatesService:
         input_folder: str,
         log: Optional[LogCallback] = None,
         cancel_check: Optional[CancelCheck] = None,
+        progress: Optional[ProgressCallback] = None,
     ) -> None:
         self._input_folder = Path(input_folder)
         self._log_callback = log
         self._cancel_check = cancel_check
+        self._progress = progress
 
     # ------------------------------------------------------------------
     # SCAN (read-only)
@@ -63,6 +66,7 @@ class DuplicatesService:
         scanner = DuplicateScanner(
             cancel_check=self._cancel_check,
             log=self._log,
+            progress=self._progress,
         )
 
         groups = await scanner.scan(files)
@@ -130,6 +134,8 @@ class DuplicatesService:
 
                 renamed += 1
 
+            self._report(i, total_groups)
+
             if i % 50 == 0 or i == total_groups:
                 await asyncio.sleep(0)
 
@@ -187,6 +193,8 @@ class DuplicatesService:
                 )
 
                 moved += 1
+
+            self._report(i, total_groups)
 
             if i % 50 == 0 or i == total_groups:
                 await asyncio.sleep(0)
@@ -297,6 +305,10 @@ class DuplicatesService:
             value /= 1024
 
         return f"{size} B"
+
+    def _report(self, done: int, total: int) -> None:
+        if self._progress is not None:
+            self._progress(done, total)
 
     def _is_cancelled(self) -> bool:
         return self._cancel_check is not None and self._cancel_check()

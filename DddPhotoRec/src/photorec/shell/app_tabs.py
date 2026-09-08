@@ -9,12 +9,16 @@ from photorec.features.renamer.renamer_tab import (
 from photorec.features.duplicates.duplicates_tab import (
     DuplicatesTab,
 )
+from photorec.features.compressor.compressor_tab import (
+    CompressorTab,
+)
 
 
 def create_app_tabs(page: ft.Page) -> ft.Control:
     recovery_tab = PhotoRecoveryTab(page)
     renamer_tab = RenamerTab(page)
     duplicates_tab = DuplicatesTab(page)
+    compressor_tab = CompressorTab(page)
 
     return ft.Tabs(
         selected_index=0,
@@ -41,6 +45,12 @@ def create_app_tabs(page: ft.Page) -> ft.Control:
                 text="Duplicates Finder",
                 icon=ft.Icons.CONTENT_COPY_OUTLINED,
                 content=duplicates_tab.build(),
+            ),
+
+            ft.Tab(
+                text="Photo Compressor",
+                icon=ft.Icons.COMPRESS,
+                content=compressor_tab.build(),
             ),
         ],
     )

@@ -7,6 +7,7 @@ from typing import Callable, List, Optional
 
 LogCallback = Callable[[str], None]
 CancelCheck = Callable[[], bool]
+ProgressCallback = Callable[[int, int], None]
 
 
 @dataclass(slots=True)
@@ -24,6 +25,7 @@ async def undo_operations(
     operations: List[RenameOperation],
     log: Optional[LogCallback] = None,
     cancel_check: Optional[CancelCheck] = None,
+    progress: Optional[ProgressCallback] = None,
 ) -> int:
     """Reverses a batch of moves: puts every file back where it started."""
 
@@ -63,6 +65,9 @@ async def undo_operations(
                 operation.target.parent.rmdir()
             except OSError:
                 pass
+
+        if progress is not None:
+            progress(i, total)
 
         if i % 50 == 0 or i == total:
             await asyncio.sleep(0)

@@ -55,6 +55,14 @@ class PhotoRecoveryTab:
             overflow=ft.TextOverflow.ELLIPSIS,
         )
 
+        self._progress_bar = ft.ProgressBar(
+            value=0,
+            visible=False,
+            color=ft.Colors.INDIGO_400,
+            bgcolor=ft.Colors.GREY_800,
+            border_radius=6,
+        )
+
         self._log_field = ft.TextField(
             multiline=True,
             read_only=True,
@@ -245,6 +253,8 @@ class PhotoRecoveryTab:
                         ],
                     ),
 
+                    self._progress_bar,
+
                     ft.Container(
                         height=1,
                         bgcolor=ft.Colors.GREY_800,
@@ -353,6 +363,9 @@ class PhotoRecoveryTab:
         self._cancel_button.disabled = False
         self._move_files_switch.disabled = True
 
+        self._progress_bar.value = 0
+        self._progress_bar.visible = True
+
         self._page.update()
 
         self._page.run_task(
@@ -378,6 +391,7 @@ class PhotoRecoveryTab:
                 move_files=self._move_files_switch.value,
                 log=self._add_log,
                 cancel_check=lambda: self._cancel_requested,
+                progress=self._on_progress,
             )
 
             await service.run()
@@ -392,7 +406,13 @@ class PhotoRecoveryTab:
             self._cancel_button.disabled = True
             self._move_files_switch.disabled = False
 
+            self._progress_bar.visible = False
+
             self._page.update()
+
+    def _on_progress(self, done: int, total: int) -> None:
+        self._progress_bar.value = (done / total) if total else None
+        self._page.update()
 
     # ==================================================================
     # LOGGING

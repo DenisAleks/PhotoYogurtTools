@@ -425,16 +425,6 @@ wheels = [
 ]
 
 [[package]]
-name = "jpegio"
-version = "0.2.8"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0b/12/8d4c0c165305c4ccd5f810e0ffe1fbda8e0345ceba4ce9b655be28057511/jpegio-0.2.8.tar.gz", hash = "sha256:096039e2e407288e84d681496f5baf50885b3f023014ba072bce20e12d321438", size = 73509447, upload-time = "2021-10-15T14:29:33.12Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/7e/6e862b92876143bed9e0c43436667b042ddff8976723772b630b96a76cc2/jpegio-0.2.8-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f5f143fb1488dbd505d93b6c4fb1e5810d4ae948d39b47162f214185f0c3c7eb", size = 1294654, upload-time = "2021-10-15T16:34:42.139Z" },
-    { url = "https://files.pythonhosted.org/packages/15/d7/04f8f667734aaf203983979ff0e02c69e8993d8bcc98dbf10985aa52dba4/jpegio-0.2.8-cp310-cp310-manylinux_2_24_x86_64.whl", hash = "sha256:9fb4d7e7e0c22cb9f7f505bc617bb09dec4644ac84f17b29ffa9d7d5672e1c00", size = 1005469, upload-time = "2021-10-15T16:34:43.269Z" },
-]
-
-[[package]]
 name = "markdown-it-py"
 version = "4.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -787,7 +777,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "flet", extra = ["all"] },
-    { name = "jpegio" },
     { name = "pillow" },
     { name = "pillow-heif" },
     { name = "reverse-geocode" },
@@ -796,7 +785,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "flet", extras = ["all"], specifier = "==0.28.3" },
-    { name = "jpegio", specifier = ">=0.2.8" },
     { name = "pillow", specifier = ">=11.3.0" },
     { name = "pillow-heif", specifier = ">=0.16.0" },
     { name = "reverse-geocode", specifier = ">=1.6" },

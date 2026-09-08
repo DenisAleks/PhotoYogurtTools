@@ -6,6 +6,7 @@ IMAGE_EXTENSIONS = {
     ".png",
     ".webp",
     ".heic",
+    ".heif",
 }
 
 VIDEO_EXTENSIONS = {

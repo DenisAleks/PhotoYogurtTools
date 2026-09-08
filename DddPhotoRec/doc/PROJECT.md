@@ -32,6 +32,8 @@ Beyond recovery it also renames & sorts a library by capture date (see
   - **Photo Recovery** — functional.
   - **Photo & Video Renamer** — functional (v1: rename + date-sort in place, with Undo).
   - **Duplicates Finder** — functional (scan → report → flag in place, with Undo).
+  - **Photo Compressor** — functional (shrink to a target size into OUTPUT; convert
+    HEIC/HEIF/PNG → JPEG; originals untouched, videos skipped).
 - Recovery **copies** files by default; a UI toggle switches it to move mode.
   The Renamer **moves** files in place and offers an **Undo** button as its
   safety net (see [Safety notes](#safety-notes)).
@@ -40,7 +42,7 @@ Beyond recovery it also renames & sorts a library by capture date (see
 
 ## How to use each tab (plain guide)
 
-The app has three tools, one per tab. **Nothing here ever deletes your files** —
+The app has four tools, one per tab. **Nothing here ever deletes your files** —
 the worst case is a copy or a rename you can undo. Every tab has a **log panel**
 at the bottom that shows what is happening while it works.
 
@@ -117,6 +119,35 @@ newer copies are the ones flagged or moved.
 **Good to know.** Photos are compared by their **actual image**, so exact copies
 are caught even when their file sizes differ slightly (padding, edited metadata).
 
+### 🗜️ Tab 4 — Photo Compressor
+
+**What it's for.** Makes large photos smaller **without changing their
+resolution** and (optionally) converts HEIC/HEIF/PNG to JPEG so they open
+everywhere (e.g. Windows). Compressed copies go into a separate OUTPUT folder;
+your originals are never changed.
+
+**Steps:**
+1. Click **Select INPUT folder** and **Select OUTPUT folder**.
+2. Choose the **Target max size** (default 2 MB).
+3. Leave **"Convert HEIC / HEIF / PNG to JPEG"** on (recommended for Windows) or
+   turn it off to keep original formats.
+4. *(Optional)* turn on **"Compress in place"** to replace files inside the INPUT
+   folder instead of writing to OUTPUT — originals are safely moved to a
+   `_Backup/` folder, and any videos are moved to a `_Video/` folder (never
+   compressed). With this on, OUTPUT isn't needed.
+5. Click **Compress**. A progress bar and the log show what's happening.
+
+**How the size target works.** For each photo the app picks the **highest JPEG
+quality that still fits your target** (so it stays under, e.g., 2 MB) — it does
+not just drop quality blindly. It never enlarges a file beyond its original size,
+and never shrinks the picture's resolution. If a very large photo can't reach the
+target without going below a safe quality floor, it's kept at the best quality it
+can and noted in the log.
+
+**Good to know.** Capture date, GPS, and orientation are preserved. **Videos are
+skipped** entirely. HEIC is already efficient, so converting it to JPEG is mainly
+for compatibility — the big space savings come from large JPEGs and PNGs.
+
 ---
 
 ## Tech stack
@@ -130,11 +161,11 @@ are caught even when their file sizes differ slightly (padding, edited metadata)
 | Geocoding      | `reverse-geocode` (offline, on-device)            |
 | Folder picker  | Tkinter `filedialog`, launched as a subprocess    |
 | Build backend  | Hatchling                                          |
-| Declared deps  | `flet[all]`, `jpegio`, `pillow`, `pillow-heif`, `reverse-geocode` |
+| Declared deps  | `flet[all]`, `pillow`, `pillow-heif`, `reverse-geocode` |
 
 > `pillow` / `pillow-heif` read capture date-time and GPS from photos;
 > `reverse-geocode` turns GPS into a place name **offline** (coordinates never
-> leave the machine). `jpegio` is still declared but currently unused.
+> leave the machine). Pillow also drives the Photo Compressor (JPEG re-encoding).
 
 ---
 
@@ -163,7 +194,6 @@ DddPhotoRec/
     │
     ├── shared/               # reusable across features
     │   ├── folder_card.py    # folder-selection card widget
-    │   ├── future_tab.py     # "coming soon" placeholder tab (unused now)
     │   ├── file_picker.py    # native folder dialog via Tkinter subprocess
     │   ├── media_scanner.py  # MediaScanner + image/video extension sets
     │   ├── hash_calculator.py# HashCalculator: full + partial SHA-256
@@ -186,13 +216,18 @@ DddPhotoRec/
         │   ├── geocoder.py           # offline GPS → place name (reverse-geocode)
         │   └── name_builder.py       # pattern tokens → folder/filename
         │
-        └── duplicates/       # ← the Duplicates Finder tab
-            ├── duplicates_tab.py     # UI: Scan / Move / Rename / Undo, log
-            ├── service.py            # DuplicatesService: scan (read-only) + rename
-            ├── duplicate_scanner.py  # images by pixels, videos by byte funnel
-            ├── report_writer.py      # the Markdown report
-            ├── naming.py             # DUP_ prefix, DUP/ folder, flag detection
-            └── models.py             # DuplicateGroup
+        ├── duplicates/       # ← the Duplicates Finder tab
+        │   ├── duplicates_tab.py     # UI: Scan / Move / Rename / Undo, log
+        │   ├── service.py            # DuplicatesService: scan (read-only) + rename
+        │   ├── duplicate_scanner.py  # images by pixels, videos by byte funnel
+        │   ├── report_writer.py      # the Markdown report
+        │   ├── naming.py             # DUP_ prefix, DUP/ folder, flag detection
+        │   └── models.py             # DuplicateGroup
+        │
+        └── compressor/       # ← the Photo Compressor tab
+            ├── compressor_tab.py     # UI: INPUT/OUTPUT, convert toggle, target
+            ├── service.py            # CompressorService: per-image → OUTPUT
+            └── encoder.py            # JPEG re-encode to a size target (keeps EXIF)
 ```
 
 > **Shared, not cross-imported:** features depend on `shared/` (scanner, hashing,
@@ -402,6 +437,107 @@ log mirrors this but caps at the first 100 groups (the report always holds all).
 
 ---
 
+## The Photo Compressor
+
+Shrinks large photos without changing resolution, and optionally converts
+HEIC/HEIF/PNG to JPEG. Two modes:
+
+- **OUTPUT mode** (default): compressed copies go to an OUTPUT folder (mirroring
+  the input structure); **originals are never modified and videos are skipped.**
+- **In-place mode**: files are replaced inside the INPUT folder. Each original is
+  first moved to `_Backup/<relative path>` (the safety net), and **videos are
+  moved to `_Video/`** (never compressed). Both `_Backup/` and `_Video/` are
+  skipped on re-runs, so it's idempotent. OUTPUT is ignored.
+
+### Fitting a size target
+`encoder.encode_jpeg_to_target()` re-encodes an image to JPEG and finds the
+**highest quality that fits the byte budget**: it tries qualities from 92 down a
+fixed ladder to a floor of 70 and returns the first that fits. If even the floor
+is over budget, it returns the floor result (best effort) — quality never drops
+below the floor, so the image is never wrecked to hit a number. It bakes EXIF
+orientation into the pixels and preserves the rest of EXIF (date, GPS — the nested
+IFDs are force-loaded so they survive re-serialization) plus the ICC profile.
+Alpha is flattened onto white (JPEG has no transparency).
+
+### Per-file decision (`CompressorService`)
+For each image (`MediaScanner` → `is_image`; videos are dropped):
+
+- **HEIC / HEIF / PNG** with the convert option on → re-encoded to **JPEG**.
+- **JPEG over the target** → recompressed (kept only if actually smaller).
+- **Anything already small enough and not being converted** → copied unchanged.
+
+The encode budget is `min(target, original size)`, so a file is **never enlarged**
+beyond its original (and never beyond the global target). Output is written to
+`OUTPUT/<relative path>` with a `.jpg` extension when converted; name clashes get
+`_1`, `_2`. The run is async with progress + Cancel and logs total bytes saved.
+
+> Note on HEIC → JPEG: HEIC is already an efficient (HEVC) format, so converting
+> it to JPEG is mainly for **compatibility** (e.g. viewing on Windows). At the
+> same visual quality JPEG is larger, which is why the size target drives the
+> quality rather than a fixed quality driving the size.
+
+### Nested folders (in-place mode)
+`MediaScanner` walks the input folder **recursively at any depth**, so the whole
+tree is handled in one pass. In in-place mode, `_Backup/` and `_Video/` are
+created once at the **root** of the input folder and **mirror each file's original
+path**, so you can always tell where something came from:
+
+| File type | What happens | Where |
+|-----------|--------------|-------|
+| **Photo** (jpg/png/heic/heif…) | compressed / converted **in place** | stays in its subfolder; original → `_Backup/<same path>` |
+| **Video** (mp4/mov…) | moved, never compressed | `_Video/<same path>` |
+| **Other files** (txt, pdf…) | **left untouched** | stay where they are |
+
+Example — before:
+
+```
+A/
+├── vacation/
+│   ├── IMG_1.heic
+│   ├── clip1.mp4
+│   └── beach/
+│       ├── IMG_2.jpg      (large)
+│       └── clip2.mov
+├── notes.txt
+└── photo3.png
+```
+
+after in-place compression:
+
+```
+A/
+├── vacation/
+│   ├── IMG_1.jpg          ← converted in place
+│   └── beach/
+│       └── IMG_2.jpg      ← recompressed in place
+├── notes.txt             ← untouched (not media)
+├── photo3.jpg            ← png converted in place
+├── _Backup/              ← originals, structure mirrored
+│   ├── vacation/IMG_1.heic
+│   ├── vacation/beach/IMG_2.jpg
+│   └── photo3.png
+└── _Video/               ← videos, structure mirrored
+    └── vacation/
+        ├── clip1.mp4
+        └── beach/clip2.mov
+```
+
+Notes: non-media files are never touched; a small photo that isn't being
+converted stays as-is (no backup); emptied folders are **not** removed (a
+subfolder that held only a video becomes empty after the move); re-runs are safe
+(`_Backup/`/`_Video/` are skipped); don't name your own folders `_Backup` or
+`_Video`, as those are treated as the app's and skipped while scanning.
+
+### Key components
+
+| Component | Responsibility |
+|-----------|----------------|
+| `encode_jpeg_to_target` | Re-encode to JPEG at the best quality that fits a byte budget; keep EXIF/ICC. |
+| `CompressorService` | Decide per file (convert / recompress / copy), write to OUTPUT, skip video. |
+| `CompressorTab`     | The Flet UI: INPUT/OUTPUT, convert toggle, target-size dropdown, Compress/Cancel. |
+
+---
+
 ## Running the app
 
 The project uses [uv](https://docs.astral.sh/uv/) (an `uv.lock` is committed).
@@ -419,9 +555,9 @@ pip install -e .
 python -m photorec.main
 ```
 
-A `1000×760` desktop window opens with three tabs. Use the **Photo Recovery**
-tab, pick the three folders, and press **Process files**. The **Process files**
-button stays disabled until all three folders are selected.
+A desktop window opens with four tabs. For recovery, use the **Photo Recovery**
+tab, pick the three folders, and press **Process files** (the button stays
+disabled until all three folders are selected).
 
 ---
 
@@ -432,6 +568,7 @@ button stays disabled until all three folders are selected.
   - *Photo Recovery* — working feature.
   - *Photo & Video Renamer* — working feature (rename + date-sort, Undo).
   - *Duplicates Finder* — working feature (scan → report → flag, Undo).
+  - *Photo Compressor* — working feature (shrink to target, convert to JPEG).
 - **Recovery tab** (`recovery_tab.py`) — three folder cards (ORIGINAL /
   RECOVERED / OUTPUT), a move/copy toggle, Process/Cancel buttons, and a
   read-only diagnostics log.
@@ -440,6 +577,12 @@ button stays disabled until all three folders are selected.
 - **Duplicates tab** (`duplicates_tab.py`) — one INPUT folder card, and
   Scan / Move to DUP folder / Rename in place / Undo / Cancel buttons over a
   large log (the report holds the rest).
+- **Compressor tab** (`compressor_tab.py`) — INPUT/OUTPUT folder cards, a
+  target-size dropdown, "convert to JPEG" and "compress in place" toggles,
+  Compress/Cancel, and a log.
+
+All long-running tabs also show a **progress bar** (driven by a `progress(done,
+total)` callback the services report; the bar hides when idle).
 - **Folder picker** (`shared/file_picker.py`) — spawns a separate Python process
   that opens a native Tkinter directory dialog (defaulting to `~/Downloads`) and
   returns the chosen path over stdout. Running it out-of-process avoids mixing
@@ -474,8 +617,6 @@ These are visible in the current source and worth cleaning up:
 
 - There is no hash/signature caching, so every run re-reads and re-hashes files.
   A persistent cache (keyed by path + size + mtime) would speed up repeated runs.
-- `jpegio` is declared but unused so far.
-- `shared/future_tab.py` is now unused (all three tabs are real) — kept for reuse.
 - Recovery matches images by **exact pixels**, so re-compressed / resized copies
   of a library photo are still reported as "recovered" (would need perceptual
   matching). Videos remain exact-byte only, so a padded/re-wrapped video won't

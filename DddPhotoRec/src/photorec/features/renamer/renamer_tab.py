@@ -194,6 +194,14 @@ class RenamerTab:
             cursor_color=ft.Colors.BLUE_300,
         )
 
+        self._progress_bar = ft.ProgressBar(
+            value=0,
+            visible=False,
+            color=ft.Colors.INDIGO_400,
+            bgcolor=ft.Colors.GREY_800,
+            border_radius=6,
+        )
+
     def _preset_option(self, label: str) -> ft.dropdown.Option:
         return ft.dropdown.Option(
             key=label,
@@ -269,6 +277,8 @@ class RenamerTab:
                             self._cancel_button,
                         ],
                     ),
+
+                    self._progress_bar,
 
                     ft.Container(
                         height=1,
@@ -393,6 +403,7 @@ class RenamerTab:
                 pattern=self._pattern_field.value,
                 log=self._add_log,
                 cancel_check=lambda: self._cancel_requested,
+                progress=self._on_progress,
             )
 
             operations = await service.run()
@@ -422,6 +433,7 @@ class RenamerTab:
                 self._last_operations,
                 log=self._add_log,
                 cancel_check=lambda: self._cancel_requested,
+                progress=self._on_progress,
             )
 
             self._last_operations = []
@@ -456,7 +468,16 @@ class RenamerTab:
 
     def _set_running(self, running: bool) -> None:
         self._running = running
+
+        self._progress_bar.visible = running
+        if running:
+            self._progress_bar.value = 0
+
         self._update_buttons()
+
+    def _on_progress(self, done: int, total: int) -> None:
+        self._progress_bar.value = (done / total) if total else None
+        self._page.update()
 
     def _update_buttons(self) -> None:
         ready = bool(

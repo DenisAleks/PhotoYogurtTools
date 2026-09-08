@@ -10,6 +10,7 @@ from photorec.shared.media_scanner import MediaScanner
 
 LogCallback = Callable[[str], None]
 CancelCheck = Callable[[], bool]
+ProgressCallback = Callable[[int, int], None]
 
 
 class PhotoRecoveryService:
@@ -21,6 +22,7 @@ class PhotoRecoveryService:
         move_files: bool = False,
         log: Optional[LogCallback] = None,
         cancel_check: Optional[CancelCheck] = None,
+        progress: Optional[ProgressCallback] = None,
     ) -> None:
         self._original_folder = Path(original_folder)
         self._recovered_folder = Path(recovered_folder)
@@ -30,6 +32,7 @@ class PhotoRecoveryService:
 
         self._log_callback = log
         self._cancel_check = cancel_check
+        self._progress = progress
 
     async def run(self) -> None:
         self._log(
@@ -152,6 +155,8 @@ class PhotoRecoveryService:
                     original=result.original,
                 )
 
+            self._report(i, total)
+
             if i % 100 == 0 or i == total:
                 self._log(
                     f"Progress: {i}/{total} "
@@ -181,6 +186,10 @@ class PhotoRecoveryService:
                 "these as new (matching them would need fuzzy/perceptual "
                 "matching)."
             )
+
+    def _report(self, done: int, total: int) -> None:
+        if self._progress is not None:
+            self._progress(done, total)
 
     def _is_cancelled(self) -> bool:
         if self._cancel_check is None:

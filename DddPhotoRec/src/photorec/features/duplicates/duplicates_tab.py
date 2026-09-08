@@ -108,6 +108,14 @@ class DuplicatesTab:
             ),
         )
 
+        self._progress_bar = ft.ProgressBar(
+            value=0,
+            visible=False,
+            color=ft.Colors.INDIGO_400,
+            bgcolor=ft.Colors.GREY_800,
+            border_radius=6,
+        )
+
         self._log_field = ft.TextField(
             multiline=True,
             read_only=True,
@@ -172,6 +180,8 @@ class DuplicatesTab:
                             self._cancel_button,
                         ],
                     ),
+
+                    self._progress_bar,
 
                     ft.Container(
                         height=1,
@@ -245,6 +255,7 @@ class DuplicatesTab:
                 input_folder=self._input_folder,
                 log=self._add_log,
                 cancel_check=lambda: self._cancel_requested,
+                progress=self._on_progress,
             )
 
             groups, _report = await service.scan()
@@ -275,6 +286,7 @@ class DuplicatesTab:
                 input_folder=self._input_folder,
                 log=self._add_log,
                 cancel_check=lambda: self._cancel_requested,
+                progress=self._on_progress,
             )
 
             operations = await service.move_to_dup_folder(self._groups)
@@ -305,6 +317,7 @@ class DuplicatesTab:
                 input_folder=self._input_folder,
                 log=self._add_log,
                 cancel_check=lambda: self._cancel_requested,
+                progress=self._on_progress,
             )
 
             operations = await service.rename(self._groups)
@@ -335,6 +348,7 @@ class DuplicatesTab:
                 self._last_operations,
                 log=self._add_log,
                 cancel_check=lambda: self._cancel_requested,
+                progress=self._on_progress,
             )
 
             # Files are back to their original names - renaming is available again.
@@ -371,7 +385,16 @@ class DuplicatesTab:
 
     def _set_running(self, running: bool) -> None:
         self._running = running
+
+        self._progress_bar.visible = running
+        if running:
+            self._progress_bar.value = 0
+
         self._update_buttons()
+
+    def _on_progress(self, done: int, total: int) -> None:
+        self._progress_bar.value = (done / total) if total else None
+        self._page.update()
 
     def _update_buttons(self) -> None:
         ready = bool(self._input_folder)
