@@ -170,6 +170,18 @@ class RenamerTab:
             ),
         )
 
+        self._extract_button = ft.ElevatedButton(
+            text="Extract screenshots",
+            disabled=True,
+            on_click=self._on_extract_clicked,
+            height=44,
+            style=ft.ButtonStyle(
+                color=ft.Colors.TEAL_200,
+                bgcolor=ft.Colors.TEAL_900,
+                shape=ft.RoundedRectangleBorder(radius=10),
+            ),
+        )
+
         self._cancel_button = ft.ElevatedButton(
             text="Cancel",
             disabled=True,
@@ -273,9 +285,18 @@ class RenamerTab:
                         spacing=10,
                         controls=[
                             self._rename_button,
+                            self._extract_button,
                             self._undo_button,
                             self._cancel_button,
                         ],
+                    ),
+
+                    ft.Text(
+                        "Extract screenshots: moves detected screenshots into a "
+                        "_Screenshots/ folder. It renames nothing — photos stay "
+                        "exactly where they are. (No pattern needed.)",
+                        size=11,
+                        color=ft.Colors.GREY_600,
                     ),
 
                     self._progress_bar,
@@ -418,6 +439,37 @@ class RenamerTab:
             self._set_running(False)
 
     # ==================================================================
+    # EXTRACT SCREENSHOTS
+    # ==================================================================
+
+    def _on_extract_clicked(self, _: ft.ControlEvent) -> None:
+        self._cancel_requested = False
+        self._set_running(True)
+
+        self._page.run_task(self._run_extract)
+
+    async def _run_extract(self) -> None:
+        try:
+            service = RenamerService(
+                input_folder=self._input_folder,
+                pattern=self._pattern_field.value or "",
+                log=self._add_log,
+                cancel_check=lambda: self._cancel_requested,
+                progress=self._on_progress,
+            )
+
+            operations = await service.extract_screenshots()
+
+            if operations:
+                self._last_operations = operations
+
+        except Exception as error:
+            self._add_log(f"ERROR: {error}")
+
+        finally:
+            self._set_running(False)
+
+    # ==================================================================
     # UNDO
     # ==================================================================
 
@@ -486,6 +538,10 @@ class RenamerTab:
         )
 
         self._rename_button.disabled = self._running or not ready
+        # Extracting screenshots needs only the input folder (no pattern).
+        self._extract_button.disabled = (
+            self._running or not self._input_folder
+        )
         self._undo_button.disabled = (
             self._running or not self._last_operations
         )

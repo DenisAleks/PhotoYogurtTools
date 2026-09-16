@@ -6,13 +6,18 @@ from typing import Callable, List, Optional, Set
 from photorec.features.renamer.date_resolver import DateResolver
 from photorec.features.renamer.geocoder import Geocoder
 from photorec.features.renamer.name_builder import NameBuilder
+from photorec.shared.image_signature import is_image
 from photorec.shared.media_scanner import MediaScanner
 from photorec.shared.rename_ops import RenameOperation, undo_operations
+from photorec.shared.screenshot_detector import is_screenshot
 
 
 LogCallback = Callable[[str], None]
 CancelCheck = Callable[[], bool]
 ProgressCallback = Callable[[int, int], None]
+
+# Folder (inside the input folder) that extracted screenshots are moved into.
+SCREENSHOTS_FOLDER_NAME = "_Screenshots"
 
 
 class RenamerService:
@@ -107,6 +112,75 @@ class RenamerService:
         self._log("Rename finished")
         self._log(f"Renamed : {renamed}")
         self._log(f"Skipped : {skipped}")
+
+        return operations
+
+    # ------------------------------------------------------------------
+    # EXTRACT SCREENSHOTS (does not rename anything)
+    # ------------------------------------------------------------------
+
+    async def extract_screenshots(self) -> List[RenameOperation]:
+        """Move detected screenshots into `_Screenshots/`; touch nothing else.
+
+        Every image under the input folder is checked; photos are left exactly
+        where they are (no renaming, no re-sorting). Returns the moves for Undo.
+        """
+        screenshots_root = self._input_folder / SCREENSHOTS_FOLDER_NAME
+
+        self._log(f"Scanning for screenshots: {self._input_folder}")
+
+        files = MediaScanner(str(self._input_folder)).scan()
+        images = [
+            f
+            for f in files
+            if is_image(f) and screenshots_root not in f.parents
+        ]
+
+        total = len(images)
+        self._log(f"Image files to check: {total}")
+
+        if total == 0:
+            self._log("No images found.")
+            return []
+
+        operations: List[RenameOperation] = []
+        planned: Set[Path] = set()
+
+        moved = 0
+
+        for i, file in enumerate(images, start=1):
+            if self._is_cancelled():
+                self._log(f"Cancelled at {i - 1}/{total}.")
+                break
+
+            if is_screenshot(file):
+                relative = file.relative_to(self._input_folder)
+                destination = self._avoid_collision(
+                    screenshots_root / relative,
+                    planned,
+                )
+                planned.add(destination)
+
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(file), str(destination))
+
+                operations.append(
+                    RenameOperation(source=file, target=destination)
+                )
+
+                moved += 1
+                self._log(f"   screenshot: {relative}")
+
+            self._report(i, total)
+
+            if i % 50 == 0 or i == total:
+                self._log(f"Progress: {i}/{total} | screenshots={moved}")
+                await asyncio.sleep(0)
+
+        self._log("")
+        self._log("Screenshot extraction finished")
+        self._log(f"Screenshots moved : {moved}  (into {SCREENSHOTS_FOLDER_NAME}/)")
+        self._log(f"Photos untouched  : {total - moved}")
 
         return operations
 

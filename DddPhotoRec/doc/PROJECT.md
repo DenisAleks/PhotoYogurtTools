@@ -97,6 +97,14 @@ Photos without GPS just leave it out.
 **Good to know.** Files are **moved** into the new date folders inside the same
 folder. Undo puts them back (until you close the app).
 
+**Extract screenshots** (separate button). Scans every photo in the folder and
+moves the ones that are **screenshots** into a `_Screenshots/` folder (keeping the
+subfolder structure). It **renames nothing** and never touches real photos, so
+it's safe to run on an already-organized library. A file is treated as a
+screenshot only if it has **no camera info** (no make/model/exposure) **and**
+looks flat (few colours, like a UI) — so real photos, which keep their camera
+info even after compression, are never moved. Undo reverses it.
+
 ### 🔍 Tab 3 — Duplicates Finder
 
 **What it's for.** Finds duplicate photos/videos **inside one folder** (and its
@@ -226,6 +234,7 @@ DddPhotoRec/
     │   ├── media_scanner.py  # MediaScanner + image/video extension sets
     │   ├── hash_calculator.py# HashCalculator: full + partial SHA-256
     │   ├── image_signature.py# decode image → pixel hash (+ dimensions)
+    │   ├── screenshot_detector.py # is_screenshot(): EXIF + pixel-flatness
     │   └── rename_ops.py     # RenameOperation + undo_operations()
     │
     └── features/
@@ -398,6 +407,22 @@ them in reverse (`target → source`) and prunes emptied folders. Undo is
 **session-scoped**: it reverses the most recent run until you run another rename
 or close the app.
 
+### Extract screenshots (separate action)
+`RenamerService.extract_screenshots()` is a **rename-free** pass: it scans every
+image and moves the ones detected as screenshots into `_Screenshots/<relative
+path>`, leaving all other files exactly where they are. It reuses the same
+`RenameOperation` / `undo_operations` machinery, so it has Undo and is safe to run
+on an already-organized library (nothing is re-dated or renumbered).
+
+`shared/screenshot_detector.is_screenshot()` uses **two signals, both required**
+(so a real photo is never moved):
+1. **No camera EXIF** — a photo has make/model/exposure tags (which survive this
+   app's compression); a screenshot has none.
+2. **Flat look** — on a NEAREST-downscaled, lightly-quantized thumbnail (to shrug
+   off JPEG noise), the top ~10 colours cover >35% of the image, which a photo's
+   detail never does. A smooth-gradient photo *would* look flat, but it keeps its
+   camera EXIF, so signal 1 protects it. Filenames are not used.
+
 ### Key components
 
 | Component | Responsibility |
@@ -406,9 +431,10 @@ or close the app.
 | `ExifReader`     | Pillow / pillow-heif: `DateTimeOriginal` and GPS. |
 | `Geocoder`       | Offline GPS → place name, with an in-run cache. |
 | `NameBuilder`    | Pattern tokens → sanitized folder + filename. |
-| `RenamerService` | Orchestrates scan → resolve → build → move. |
+| `is_screenshot`  | EXIF + pixel-flatness screenshot detection (shared). |
+| `RenamerService` | Rename+sort (`run`) and screenshot extraction (`extract_screenshots`). |
 | `undo_operations`| Reverses a run and cleans empty folders. |
-| `RenamerTab`     | The Flet UI: input folder, pattern, Rename/Undo/Cancel. |
+| `RenamerTab`     | The Flet UI: pattern, Rename / Extract screenshots / Undo / Cancel. |
 
 ---
 
@@ -644,7 +670,8 @@ disabled until all three folders are selected).
   RECOVERED / OUTPUT), a move/copy toggle, Process/Cancel buttons, and a
   read-only diagnostics log.
 - **Renamer tab** (`renamer_tab.py`) — one INPUT folder card, a preset dropdown +
-  pattern field + live preview, and Rename/Undo/Cancel buttons over a log.
+  pattern field + live preview, and Rename / **Extract screenshots** / Undo /
+  Cancel buttons over a log.
 - **Duplicates tab** (`duplicates_tab.py`) — one INPUT folder card, and
   Scan / Move to DUP folder / Rename in place / Undo / Cancel buttons over a
   large log (the report holds the rest).

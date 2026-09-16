@@ -56,20 +56,17 @@ a tool like PhotoRec), you get one big messy folder. Many of those photos you
 "already have it" vs "genuinely new".
 
 **You choose three folders:**
-
 - **ORIGINAL** — your existing, tidy photo library (what you already own).
 - **RECOVERED** — the messy folder the recovery tool produced.
 - **OUTPUT** — an empty folder where the sorted results are written.
 
 **Steps:**
-
 1. Click each *Select … folder* button and pick the folder.
 2. *(Optional)* turn on **"Move files instead of copying"** to move recovered
    files instead of copying them. Off (the default) is safe — it only copies.
 3. Click **Process files** and watch the log.
 
 **What you get in OUTPUT:**
-
 - `duplicates/…` — recovered photos you already had in your library.
 - `recovered/…` — genuinely new photos worth keeping.
 
@@ -84,7 +81,6 @@ names and sorts them into year/month folders — e.g.
 `2024/10/2024-10-05_14-30-22.heic`.
 
 **Steps:**
-
 1. Click **Select INPUT folder** — the folder of photos/videos to tidy.
 2. Pick a **naming pattern** from the dropdown, or type your own. The
    **Example** line shows exactly how a file will be named.
@@ -101,6 +97,14 @@ Photos without GPS just leave it out.
 **Good to know.** Files are **moved** into the new date folders inside the same
 folder. Undo puts them back (until you close the app).
 
+**Extract screenshots** (separate button). Scans every photo in the folder and
+moves the ones that are **screenshots** into a `_Screenshots/` folder (keeping the
+subfolder structure). It **renames nothing** and never touches real photos, so
+it's safe to run on an already-organized library. A file is treated as a
+screenshot only if it has **no camera info** (no make/model/exposure) **and**
+looks flat (few colours, like a UI) — so real photos, which keep their camera
+info even after compression, are never moved. Undo reverses it.
+
 ### 🔍 Tab 3 — Duplicates Finder
 
 **What it's for.** Finds duplicate photos/videos **inside one folder** (and its
@@ -108,7 +112,6 @@ subfolders) — the same picture saved several times. Nothing is deleted; you
 decide what to remove.
 
 **Steps:**
-
 1. Click **Select INPUT folder**.
 2. Click **Scan for duplicates** — this only *looks*, it changes nothing. It
    writes a `.md` report into the folder and lists the duplicate groups in the log.
@@ -134,7 +137,6 @@ everywhere (e.g. Windows). Compressed copies go into a separate OUTPUT folder;
 your originals are never changed.
 
 **Steps:**
-
 1. Click **Select INPUT folder** and **Select OUTPUT folder**.
 2. Choose the **Target max size** (default 2 MB).
 3. Leave **"Convert HEIC / HEIF / PNG to JPEG"** on (recommended for Windows) or
@@ -164,7 +166,6 @@ so they play everywhere (Windows included) and take less space — **without
 changing resolution** by default. Works on a whole folder in the background.
 
 **Steps:**
-
 1. Click **Select INPUT folder**.
 2. Pick a **Quality** (High / Medium / Strong — higher quality = bigger file).
 3. *(Optional)* turn on **"Downscale very large videos to 720p"** and choose the
@@ -186,16 +187,16 @@ clips still shrink because they're recorded at a high bitrate.
 
 ## Tech stack
 
-| Concern        | Choice                                                                    |
-| -------------- | ------------------------------------------------------------------------- |
-| Language       | Python 3.10+                                                              |
-| GUI            | [Flet](https://flet.dev) `0.28.3` (desktop app)                           |
-| Hashing        | `hashlib.sha256` (stdlib)                                                 |
-| Photo metadata | Pillow EXIF + `pillow-heif` (HEIC)                                        |
-| Video encoding | FFmpeg via `imageio-ffmpeg` (bundled static binary)                       |
-| Geocoding      | `reverse-geocode` (offline, on-device)                                    |
-| Folder picker  | Tkinter `filedialog`, launched as a subprocess                            |
-| Build backend  | Hatchling                                                                 |
+| Concern        | Choice                                            |
+|----------------|---------------------------------------------------|
+| Language       | Python 3.10+                                       |
+| GUI            | [Flet](https://flet.dev) `0.28.3` (desktop app)   |
+| Hashing        | `hashlib.sha256` (stdlib)                          |
+| Photo metadata | Pillow EXIF + `pillow-heif` (HEIC)                 |
+| Video encoding | FFmpeg via `imageio-ffmpeg` (bundled static binary) |
+| Geocoding      | `reverse-geocode` (offline, on-device)            |
+| Folder picker  | Tkinter `filedialog`, launched as a subprocess    |
+| Build backend  | Hatchling                                          |
 | Declared deps  | `flet[all]`, `pillow`, `pillow-heif`, `reverse-geocode`, `imageio-ffmpeg` |
 
 > `pillow` / `pillow-heif` read capture date-time and GPS from photos;
@@ -233,6 +234,7 @@ DddPhotoRec/
     │   ├── media_scanner.py  # MediaScanner + image/video extension sets
     │   ├── hash_calculator.py# HashCalculator: full + partial SHA-256
     │   ├── image_signature.py# decode image → pixel hash (+ dimensions)
+    │   ├── screenshot_detector.py # is_screenshot(): EXIF + pixel-flatness
     │   └── rename_ops.py     # RenameOperation + undo_operations()
     │
     └── features/
@@ -288,7 +290,6 @@ The run is driven by `PhotoRecoveryService.run()`
 (`features/recovery/service.py`):
 
 ### 1. Scan originals
-
 `MediaScanner` recursively walks the ORIGINAL folder (`rglob("*")`) and keeps
 only files whose extension is in the supported media set:
 
@@ -296,7 +297,6 @@ only files whose extension is in the supported media set:
 - videos: `.mp4 .mov .m4v .avi .mkv .3gp`
 
 ### 2. Build the index (content signatures)
-
 `OriginalIndex.build()` (async, with progress + cancel) computes a **content
 signature** for every library file and stores `dict[signature → path]`:
 
@@ -311,7 +311,6 @@ signature** for every library file and stores `dict[signature → path]`:
 It also remembers the set of image dimensions seen, used only for diagnostics.
 
 ### 3. Scan & classify recovered files
-
 For each file in the RECOVERED folder, `DuplicateFinder.find_original()` computes
 the same content signature (pixels for images, bytes for videos) and looks it up
 in the index. A hit → **duplicate** (the matched library file); a miss →
@@ -321,7 +320,6 @@ match a library photo but whose pixels differ is flagged as a likely
 need fuzzy/perceptual matching).
 
 ### 4. Route the output
-
 `DuplicateProcessor` writes each file under OUTPUT:
 
 - **Duplicates** → `OUTPUT/duplicates/<original-relative-path>/<name>_DUP.<ext>`
@@ -334,7 +332,6 @@ Files are **copied** (`shutil.copy2`) by default; set `move_files=True` to move
 instead (`shutil.move`).
 
 ### 5. Progress & cancellation
-
 The service reports progress through a `log` callback (wired to the on-screen log
 panel) and checks a `cancel_check` callback frequently, so a run can be stopped
 mid-way. The loop yields control to the async event loop (`asyncio.sleep(0)`)
@@ -344,16 +341,16 @@ periodically so the Flet UI stays responsive.
 
 ## Key components
 
-| Component              | Responsibility                                             |
-| ---------------------- | ---------------------------------------------------------- |
-| `MediaScanner`         | Recursively find supported media files (shared).           |
-| `image_signature`      | Decode an image and hash its **pixels** (+ dimensions).    |
-| `OriginalIndex`        | Index library files by content signature (pixels/bytes).   |
-| `DuplicateFinder`      | Match a recovered file by content; returns `MatchResult`.  |
-| `DuplicateProcessor`   | Copy/move a file into the correct output subtree.          |
-| `HashCalculator`       | Chunked (8 MB) SHA-256, cancellable mid-file (shared).     |
-| `PhotoRecoveryService` | Orchestrates scan → index → classify → route.              |
-| `PhotoRecoveryTab`     | The Flet UI for selecting folders and running the process. |
+| Component            | Responsibility |
+|----------------------|----------------|
+| `MediaScanner`       | Recursively find supported media files (shared). |
+| `image_signature`    | Decode an image and hash its **pixels** (+ dimensions). |
+| `OriginalIndex`      | Index library files by content signature (pixels/bytes). |
+| `DuplicateFinder`    | Match a recovered file by content; returns `MatchResult`. |
+| `DuplicateProcessor` | Copy/move a file into the correct output subtree. |
+| `HashCalculator`     | Chunked (8 MB) SHA-256, cancellable mid-file (shared). |
+| `PhotoRecoveryService` | Orchestrates scan → index → classify → route. |
+| `PhotoRecoveryTab`   | The Flet UI for selecting folders and running the process. |
 
 All of the above (except the shared/shell helpers) live under
 `features/recovery/`.
@@ -369,7 +366,6 @@ Renames media by **capture date-time** and sorts it into dated subfolders
 place** inside that folder, and an **Undo** button reverses the whole run.
 
 ### Where the date comes from
-
 `DateResolver` tries sources in order and records which one won:
 
 1. **EXIF** `DateTimeOriginal` — real capture time (photos; HEIC via
@@ -380,32 +376,29 @@ place** inside that folder, and an **Undo** button reverses the whole run.
    resort. **Videos** use this path (no video-metadata library in v1).
 
 ### The naming pattern
-
 The UI offers a **preset dropdown**, an editable **pattern field**, and a **live
 preview**. A pattern is a mix of literal text, date tokens, and `/` (which
 creates subfolders). `NameBuilder` translates tokens, formats the date,
 substitutes the extras, sanitizes each path component (illegal chars, over-long
 names), and lowercases the extension.
 
-| Token                 | Meaning                   |     | Token       | Meaning                  |
-| --------------------- | ------------------------- | --- | ----------- | ------------------------ |
-| `YYYY` / `YY`         | year                      |     | `HH` / `hh` | hour 24h / 12h           |
-| `MM` / `MMM` / `MMMM` | month num / Oct / October |     | `mm` `ss`   | minute, second           |
-| `DD`                  | day                       |     | `{name}`    | original filename (stem) |
-| `/`                   | subfolder separator       |     | `{loc}`     | place name (see below)   |
+| Token | Meaning | | Token | Meaning |
+|-------|---------|-|-------|---------|
+| `YYYY` / `YY` | year | | `HH` / `hh` | hour 24h / 12h |
+| `MM` / `MMM` / `MMMM` | month num / Oct / October | | `mm` `ss` | minute, second |
+| `DD` | day | | `{name}` | original filename (stem) |
+| `/` | subfolder separator | | `{loc}` | place name (see below) |
 
 Default pattern: `YYYY/MM/YYYY-MM-DD_HH-mm-ss`. If two files map to the same
 name, `_1`, `_2`… is appended.
 
 ### Location (`{loc}`)
-
 Only computed when the pattern contains `{loc}`. `Geocoder` reads EXIF GPS and
 resolves it to the nearest city via `reverse-geocode` — a bundled dataset,
 **fully offline**, so coordinates never leave the machine. Files without GPS
 (most videos, screenshots) simply drop the segment and the name stays valid.
 
 ### Applying & Undo
-
 `RenamerService.run()` scans, resolves each file, computes its destination, and
 `shutil.move`s it — skipping files already at their target — while logging
 progress and honoring Cancel (same async pattern as recovery). It returns the
@@ -414,17 +407,34 @@ them in reverse (`target → source`) and prunes emptied folders. Undo is
 **session-scoped**: it reverses the most recent run until you run another rename
 or close the app.
 
+### Extract screenshots (separate action)
+`RenamerService.extract_screenshots()` is a **rename-free** pass: it scans every
+image and moves the ones detected as screenshots into `_Screenshots/<relative
+path>`, leaving all other files exactly where they are. It reuses the same
+`RenameOperation` / `undo_operations` machinery, so it has Undo and is safe to run
+on an already-organized library (nothing is re-dated or renumbered).
+
+`shared/screenshot_detector.is_screenshot()` uses **two signals, both required**
+(so a real photo is never moved):
+1. **No camera EXIF** — a photo has make/model/exposure tags (which survive this
+   app's compression); a screenshot has none.
+2. **Flat look** — on a NEAREST-downscaled, lightly-quantized thumbnail (to shrug
+   off JPEG noise), the top ~10 colours cover >35% of the image, which a photo's
+   detail never does. A smooth-gradient photo *would* look flat, but it keeps its
+   camera EXIF, so signal 1 protects it. Filenames are not used.
+
 ### Key components
 
-| Component         | Responsibility                                          |
-| ----------------- | ------------------------------------------------------- |
-| `DateResolver`    | Capture date-time via EXIF → filename → filesystem.     |
-| `ExifReader`      | Pillow / pillow-heif: `DateTimeOriginal` and GPS.       |
-| `Geocoder`        | Offline GPS → place name, with an in-run cache.         |
-| `NameBuilder`     | Pattern tokens → sanitized folder + filename.           |
-| `RenamerService`  | Orchestrates scan → resolve → build → move.             |
-| `undo_operations` | Reverses a run and cleans empty folders.                |
-| `RenamerTab`      | The Flet UI: input folder, pattern, Rename/Undo/Cancel. |
+| Component | Responsibility |
+|-----------|----------------|
+| `DateResolver`   | Capture date-time via EXIF → filename → filesystem. |
+| `ExifReader`     | Pillow / pillow-heif: `DateTimeOriginal` and GPS. |
+| `Geocoder`       | Offline GPS → place name, with an in-run cache. |
+| `NameBuilder`    | Pattern tokens → sanitized folder + filename. |
+| `is_screenshot`  | EXIF + pixel-flatness screenshot detection (shared). |
+| `RenamerService` | Rename+sort (`run`) and screenshot extraction (`extract_screenshots`). |
+| `undo_operations`| Reverses a run and cleans empty folders. |
+| `RenamerTab`     | The Flet UI: pattern, Rename / Extract screenshots / Undo / Cancel. |
 
 ---
 
@@ -445,7 +455,6 @@ two-step:
 3. **Undo** reverses the last action (shared `undo_operations`, works for both).
 
 ### How matches are decided
-
 `DuplicateScanner.scan()` splits files by type and uses the same content logic as
 the Recovery tab, so copies that differ only in padding or EXIF still group:
 
@@ -460,7 +469,6 @@ Groups are sorted by reclaimable space (biggest first, summed from each
 duplicate's actual byte size). Runs async with progress logging and Cancel.
 
 ### Keeper & flagging
-
 In each group the **oldest** file (earliest `st_birthtime`/`st_mtime`) is the
 **keeper** and is left untouched; the other copies are flagged. The `DUP_` prefix
 (`naming.flagged_name`) is used rather than an infix marker because Finder/Explorer
@@ -470,7 +478,6 @@ the `DUP/` folder, are skipped, so both actions are idempotent; name clashes get
 `_1`, `_2`…
 
 ### The report
-
 `ReportWriter` saves `_DUPLICATES_REPORT_<date>_<time>.md` in the input folder:
 a summary header (files scanned, groups, redundant count, reclaimable space) and
 one section per group listing the keeper and each duplicate path. The on-screen
@@ -478,14 +485,14 @@ log mirrors this but caps at the first 100 groups (the report always holds all).
 
 ### Key components
 
-| Component           | Responsibility                                                        |
-| ------------------- | --------------------------------------------------------------------- |
-| `DuplicateScanner`  | images by pixel content, videos by byte funnel → `DuplicateGroup[]`.  |
-| `DuplicateGroup`    | A content-identical set: keeper + duplicates; reclaimable size.       |
-| `ReportWriter`      | Renders the Markdown report.                                          |
-| `naming`            | `DUP_` prefix, `DUP/` folder name, already-flagged detection.         |
-| `DuplicatesService` | Scan (read-only), rename-in-place, and move-to-`DUP/` (all explicit). |
-| `DuplicatesTab`     | The Flet UI: input folder, Scan / Move / Rename / Undo / Cancel, log. |
+| Component | Responsibility |
+|-----------|----------------|
+| `DuplicateScanner` | images by pixel content, videos by byte funnel → `DuplicateGroup[]`. |
+| `DuplicateGroup`   | A content-identical set: keeper + duplicates; reclaimable size. |
+| `ReportWriter`     | Renders the Markdown report. |
+| `naming`           | `DUP_` prefix, `DUP/` folder name, already-flagged detection. |
+| `DuplicatesService`| Scan (read-only), rename-in-place, and move-to-`DUP/` (all explicit). |
+| `DuplicatesTab`    | The Flet UI: input folder, Scan / Move / Rename / Undo / Cancel, log. |
 
 ---
 
@@ -502,7 +509,6 @@ HEIC/HEIF/PNG to JPEG. Two modes:
   skipped on re-runs, so it's idempotent. OUTPUT is ignored.
 
 ### Fitting a size target
-
 `encoder.encode_jpeg_to_target()` re-encodes an image to JPEG and finds the
 **highest quality that fits the byte budget**: it tries qualities from 92 down a
 fixed ladder to a floor of 70 and returns the first that fits. If even the floor
@@ -513,7 +519,6 @@ IFDs are force-loaded so they survive re-serialization) plus the ICC profile.
 Alpha is flattened onto white (JPEG has no transparency).
 
 ### Per-file decision (`CompressorService`)
-
 For each image (`MediaScanner` → `is_image`; videos are dropped):
 
 - **HEIC / HEIF / PNG** with the convert option on → re-encoded to **JPEG**.
@@ -531,17 +536,16 @@ beyond its original (and never beyond the global target). Output is written to
 > quality rather than a fixed quality driving the size.
 
 ### Nested folders (in-place mode)
-
 `MediaScanner` walks the input folder **recursively at any depth**, so the whole
 tree is handled in one pass. In in-place mode, `_Backup/` and `_Video/` are
 created once at the **root** of the input folder and **mirror each file's original
 path**, so you can always tell where something came from:
 
-| File type                      | What happens                        | Where                                                    |
-| ------------------------------ | ----------------------------------- | -------------------------------------------------------- |
+| File type | What happens | Where |
+|-----------|--------------|-------|
 | **Photo** (jpg/png/heic/heif…) | compressed / converted **in place** | stays in its subfolder; original → `_Backup/<same path>` |
-| **Video** (mp4/mov…)           | moved, never compressed             | `_Video/<same path>`                                     |
-| **Other files** (txt, pdf…)    | **left untouched**                  | stay where they are                                      |
+| **Video** (mp4/mov…) | moved, never compressed | `_Video/<same path>` |
+| **Other files** (txt, pdf…) | **left untouched** | stay where they are |
 
 Example — before:
 
@@ -585,11 +589,11 @@ subfolder that held only a video becomes empty after the move); re-runs are safe
 
 ### Key components
 
-| Component               | Responsibility                                                                    |
-| ----------------------- | --------------------------------------------------------------------------------- |
-| `encode_jpeg_to_target` | Re-encode to JPEG at the best quality that fits a byte budget; keep EXIF/ICC.     |
-| `CompressorService`     | Decide per file (convert / recompress / copy), write to OUTPUT, skip video.       |
-| `CompressorTab`         | The Flet UI: INPUT/OUTPUT, convert toggle, target-size dropdown, Compress/Cancel. |
+| Component | Responsibility |
+|-----------|----------------|
+| `encode_jpeg_to_target` | Re-encode to JPEG at the best quality that fits a byte budget; keep EXIF/ICC. |
+| `CompressorService` | Decide per file (convert / recompress / copy), write to OUTPUT, skip video. |
+| `CompressorTab`     | The Flet UI: INPUT/OUTPUT, convert toggle, target-size dropdown, Compress/Cancel. |
 
 ---
 
@@ -600,7 +604,6 @@ compatibility (plays on Windows) and size. Photos and other files are ignored;
 videos are the only target.
 
 ### Encoding (`ffmpeg_runner`)
-
 There is no pure-Python video encoder, so this uses **FFmpeg**. `imageio-ffmpeg`
 ships a static binary (`get_ffmpeg_exe()`), so nothing is installed system-wide
 and it packages into the `.exe`. `encode_h264()`:
@@ -615,7 +618,6 @@ and it packages into the `.exe`. `encode_h264()`:
   clip duration to report **per-file progress** (0..1); **Cancel kills ffmpeg**.
 
 ### Per-file decision (`VideoCompressorService`)
-
 Sequential (video encoding already saturates the CPU). For each video: encode to
 a temp file, then keep it **only if it's smaller** than the original — if so, the
 original is moved to `_Backup/<relative path>` and the `.mp4` takes its place;
@@ -624,11 +626,11 @@ otherwise the original is left untouched. Two progress signals are reported: an
 
 ### Key components
 
-| Component                | Responsibility                                                                    |
-| ------------------------ | --------------------------------------------------------------------------------- |
-| `encode_h264`            | Run ffmpeg to H.264/mp4 at a CRF; optional 720p; per-file progress; cancellable.  |
+| Component | Responsibility |
+|-----------|----------------|
+| `encode_h264` | Run ffmpeg to H.264/mp4 at a CRF; optional 720p; per-file progress; cancellable. |
 | `VideoCompressorService` | Scan videos, encode in place with `_Backup/`, report overall + per-file progress. |
-| `VideoCompressorTab`     | The Flet UI: INPUT, quality, 720p toggle + size threshold, two progress bars.     |
+| `VideoCompressorTab` | The Flet UI: INPUT, quality, 720p toggle + size threshold, two progress bars. |
 
 ---
 
@@ -668,7 +670,8 @@ disabled until all three folders are selected).
   RECOVERED / OUTPUT), a move/copy toggle, Process/Cancel buttons, and a
   read-only diagnostics log.
 - **Renamer tab** (`renamer_tab.py`) — one INPUT folder card, a preset dropdown +
-  pattern field + live preview, and Rename/Undo/Cancel buttons over a log.
+  pattern field + live preview, and Rename / **Extract screenshots** / Undo /
+  Cancel buttons over a log.
 - **Duplicates tab** (`duplicates_tab.py`) — one INPUT folder card, and
   Scan / Move to DUP folder / Rename in place / Undo / Cancel buttons over a
   large log (the report holds the rest).
@@ -682,7 +685,6 @@ disabled until all three folders are selected).
 All long-running tabs also show a **progress bar** (driven by a `progress(done,
 total)` callback the services report; the bar hides when idle). The Video tab
 adds a second bar for the current file's encode progress.
-
 - **Folder picker** (`shared/file_picker.py`) — spawns a separate Python process
   that opens a native Tkinter directory dialog (defaulting to `~/Downloads`) and
   returns the chosen path over stdout. Running it out-of-process avoids mixing
@@ -729,3 +731,4 @@ These are visible in the current source and worth cleaning up:
 - The Video Compressor has **no Undo** — its safety net is the `_Backup/` folder.
   It bundles a static **ffmpeg** binary (`imageio-ffmpeg`), which adds ~30–70 MB
   to a packaged `.exe`; verify the binary is included when packaging.
+```
