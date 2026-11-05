@@ -1,8 +1,10 @@
 import asyncio
+import os
 import shutil
 from pathlib import Path
 from typing import Callable, Optional, Set, Tuple
 
+from photorec.shared.rename_ops import safe_move
 from photorec.features.compressor.encoder import (
     QUALITY_FLOOR,
     encode_jpeg_to_target,
@@ -106,22 +108,29 @@ class CompressorService:
                 self._log(f"Cancelled at {i - 1}/{total}.")
                 return
 
-            action, before, after, fits = self._process_one(file, planned)
-
-            total_before += before
-            total_after += after
-
-            if action == "convert":
-                converted += 1
-            elif action == "recompress":
-                recompressed += 1
-            elif action == "copy":
-                copied += 1
-            elif action == "fail":
+            try:
+                action, before, after, fits = self._process_one(file, planned)
+            except OSError as error:
+                # A locked / permission-protected file must not stop the run.
                 failed += 1
+                self._log(f"   SKIPPED (locked/permission): {file} — {error}")
+                action = None
 
-            if action in ("convert", "recompress") and not fits:
-                over_target += 1
+            if action is not None:
+                total_before += before
+                total_after += after
+
+                if action == "convert":
+                    converted += 1
+                elif action == "recompress":
+                    recompressed += 1
+                elif action == "copy":
+                    copied += 1
+                elif action == "fail":
+                    failed += 1
+
+                if action in ("convert", "recompress") and not fits:
+                    over_target += 1
 
             self._report(i, total)
 
@@ -239,8 +248,14 @@ class CompressorService:
             destination = self._reserve_under(
                 self._video_root, relative, planned
             )
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(video), str(destination))
+
+            try:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                safe_move(video, destination)
+            except OSError as error:
+                self._log(f"   SKIPPED video (locked/permission): {video} — {error}")
+                continue
+
             moved += 1
 
         self._log(f"Videos moved to {VIDEO_FOLDER_NAME}/: {moved}")
@@ -249,7 +264,7 @@ class CompressorService:
     def _backup(self, file: Path, relative: Path) -> None:
         destination = self._backup_root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(file), str(destination))
+        safe_move(file, destination)
 
     def _is_own_folder(self, file: Path) -> bool:
         # Ignore our own _Backup / _Video trees on re-runs.
@@ -290,6 +305,13 @@ class CompressorService:
     def _copy(self, source: Path, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+
+        # Don't carry a macOS 'locked' flag onto the copy.
+        if hasattr(os, "chflags"):
+            try:
+                os.chflags(str(destination), 0)
+            except OSError:
+                pass
 
     def _human(self, size: int) -> str:
         value = float(size)

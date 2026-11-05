@@ -16,6 +16,19 @@ VIDEO_EXTENSIONS = {
     ".avi",
     ".mkv",
     ".3gp",
+    # Legacy / less-common containers, so they are found and can be converted.
+    ".flv",
+    ".wmv",
+    ".mpg",
+    ".mpeg",
+    ".m2ts",
+    ".mts",
+    ".ts",
+    ".vob",
+    ".divx",
+    ".asf",
+    ".ogv",
+    ".webm",
 }
 
 MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS

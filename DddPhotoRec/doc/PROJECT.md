@@ -407,6 +407,14 @@ them in reverse (`target → source`) and prunes emptied folders. Undo is
 **session-scoped**: it reverses the most recent run until you run another rename
 or close the app.
 
+Moves go through `shared.rename_ops.safe_move`, which uses `os.replace` (atomic,
+same-filesystem) and **forces past a macOS "locked" (`UF_IMMUTABLE`) flag**: it
+clears the flag and renames, leaving the moved file **unlocked**. A file that
+still can't be moved (a real permission issue) is **logged and skipped** — one
+bad file never aborts the run. The same `safe_move` + skip-and-continue applies
+across all tabs that move files (Renamer, Duplicates Finder, Photo/Video
+Compressors).
+
 ### Extract screenshots (separate action)
 `RenamerService.extract_screenshots()` is a **rename-free** pass: it scans every
 image and moves the ones detected as screenshots into `_Screenshots/<relative

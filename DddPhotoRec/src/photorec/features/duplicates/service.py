@@ -1,5 +1,4 @@
 import asyncio
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional, Set, Tuple
@@ -13,7 +12,7 @@ from photorec.features.duplicates.naming import (
 )
 from photorec.features.duplicates.report_writer import ReportWriter
 from photorec.shared.media_scanner import MediaScanner
-from photorec.shared.rename_ops import RenameOperation
+from photorec.shared.rename_ops import RenameOperation, safe_move
 
 
 LogCallback = Callable[[str], None]
@@ -98,6 +97,7 @@ class DuplicatesService:
 
         renamed = 0
         skipped = 0
+        failed = 0
 
         total_groups = len(groups)
 
@@ -123,7 +123,13 @@ class DuplicatesService:
 
                 planned.add(destination)
 
-                shutil.move(str(duplicate), str(destination))
+                try:
+                    safe_move(duplicate, destination)
+                except OSError as error:
+                    failed += 1
+                    planned.discard(destination)
+                    self._log(f"   SKIPPED (locked/permission): {duplicate} — {error}")
+                    continue
 
                 operations.append(
                     RenameOperation(
@@ -143,6 +149,8 @@ class DuplicatesService:
         self._log("Rename finished")
         self._log(f"Flagged : {renamed}")
         self._log(f"Skipped : {skipped}")
+        if failed:
+            self._log(f"Failed  : {failed}  (could not move — see log)")
 
         return operations
 
@@ -164,6 +172,7 @@ class DuplicatesService:
 
         moved = 0
         skipped = 0
+        failed = 0
 
         total_groups = len(groups)
 
@@ -182,8 +191,14 @@ class DuplicatesService:
 
                 planned.add(destination)
 
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(duplicate), str(destination))
+                try:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    safe_move(duplicate, destination)
+                except OSError as error:
+                    failed += 1
+                    planned.discard(destination)
+                    self._log(f"   SKIPPED (locked/permission): {duplicate} — {error}")
+                    continue
 
                 operations.append(
                     RenameOperation(
@@ -203,6 +218,8 @@ class DuplicatesService:
         self._log("Move finished")
         self._log(f"Moved   : {moved}  (into {DUP_FOLDER_NAME}/)")
         self._log(f"Skipped : {skipped}")
+        if failed:
+            self._log(f"Failed  : {failed}  (could not move — see log)")
 
         return operations
 

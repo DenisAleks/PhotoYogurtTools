@@ -1,9 +1,10 @@
-import shutil
 from pathlib import Path
 from typing import Callable, List, Optional, Set
 
+from photorec.shared.rename_ops import safe_move
 from photorec.features.video.ffmpeg_runner import (
     FFMPEG_AVAILABLE,
+    convert_to_mp4,
     encode_h264,
 )
 from photorec.shared.image_signature import is_image
@@ -16,6 +17,9 @@ ProgressCallback = Callable[[int, int], None]     # overall: done files / total
 FileProgressCallback = Callable[[float], None]    # current file: 0.0 .. 1.0
 
 BACKUP_FOLDER_NAME = "_Backup"
+
+# Containers treated as current: "Convert to MP4" leaves these untouched.
+MODERN_VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov"}
 
 # Quality preset label -> libx264 CRF (lower = higher quality / bigger).
 CRF_BY_QUALITY = {
@@ -133,10 +137,16 @@ class VideoCompressorService:
                 self._cleanup(temp)
                 self._log(f"   no size benefit ({self._human(after)}) — kept original.")
             else:
-                self._backup(video)
-
-                destination = self._reserve(video.with_suffix(".mp4"), planned)
-                shutil.move(str(temp), str(destination))
+                try:
+                    self._backup(video)
+                    destination = self._reserve(video.with_suffix(".mp4"), planned)
+                    safe_move(temp, destination)
+                except OSError as error:
+                    failed += 1
+                    self._cleanup(temp)
+                    self._log(f"   SKIPPED (locked/permission): {video} — {error}")
+                    self._report_overall(i, total)
+                    continue
 
                 compressed += 1
                 total_before += before
@@ -163,6 +173,108 @@ class VideoCompressorService:
                 "(delete it once you're happy)."
             )
 
+    async def run_convert(self) -> None:
+        """Convert legacy-format videos to .mp4 without compressing them.
+
+        Only non-MP4 containers (e.g. .avi, .3gp, .wmv) are touched. Each is
+        remuxed into an .mp4 next to it (same folder); the original is moved to
+        `_Backup/`, mirroring its path, exactly like compression does.
+        """
+        if not FFMPEG_AVAILABLE:
+            self._log("ERROR: ffmpeg is not available (install imageio-ffmpeg).")
+            return
+
+        self._log(f"Scanning: {self._input}")
+
+        files = MediaScanner(str(self._input)).scan()
+        videos = [
+            f
+            for f in files
+            if not is_image(f) and self._backup_root not in f.parents
+        ]
+        legacy = [
+            v for v in videos if v.suffix.lower() not in MODERN_VIDEO_EXTENSIONS
+        ]
+
+        self._log(f"Videos found: {len(videos)} · to convert: {len(legacy)}")
+
+        if not legacy:
+            self._log("No legacy-format videos to convert.")
+            return
+
+        planned: Set[Path] = set()
+
+        converted = failed = 0
+        total = len(legacy)
+
+        for i, video in enumerate(legacy, start=1):
+            if self._is_cancelled():
+                self._log(f"Cancelled at {i - 1}/{total}.")
+                return
+
+            before = video.stat().st_size
+            extension = video.suffix.lower()
+
+            self._log(
+                f"[{i}/{total}] {video.name} "
+                f"({extension} → .mp4, {self._human(before)})"
+            )
+
+            self._set_file_progress(0.0)
+
+            temp = video.with_name(f"{video.stem}.__conv__.mp4")
+
+            mode = await convert_to_mp4(
+                source=video,
+                destination=temp,
+                progress=self._set_file_progress,
+                cancel_check=self._is_cancelled,
+            )
+
+            if self._is_cancelled():
+                self._cleanup(temp)
+                self._log(f"Cancelled at {i - 1}/{total}.")
+                return
+
+            if mode is None or not temp.exists():
+                failed += 1
+                self._cleanup(temp)
+                self._log("   failed — kept original.")
+                self._report_overall(i, total)
+                continue
+
+            after = temp.stat().st_size
+
+            try:
+                self._backup(video)
+                destination = self._reserve(video.with_suffix(".mp4"), planned)
+                safe_move(temp, destination)
+            except OSError as error:
+                failed += 1
+                self._cleanup(temp)
+                self._log(f"   SKIPPED (locked/permission): {video} — {error}")
+                self._report_overall(i, total)
+                continue
+
+            converted += 1
+            self._log(
+                f"   {extension} → mp4 ({mode}); "
+                f"{self._human(before)} → {self._human(after)}"
+            )
+
+            self._report_overall(i, total)
+
+        self._log("")
+        self._log("Conversion finished")
+        self._log(f"Converted : {converted}")
+        if failed:
+            self._log(f"Failed    : {failed}")
+        if converted:
+            self._log(
+                f"Originals backed up in: {BACKUP_FOLDER_NAME}/ "
+                "(delete it once you're happy)."
+            )
+
     # ------------------------------------------------------------------
     # INTERNAL
     # ------------------------------------------------------------------
@@ -171,7 +283,7 @@ class VideoCompressorService:
         relative = video.relative_to(self._input)
         destination = self._backup_root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(video), str(destination))
+        safe_move(video, destination)
 
     def _reserve(self, relative_path: Path, planned: Set[Path]) -> Path:
         destination = relative_path

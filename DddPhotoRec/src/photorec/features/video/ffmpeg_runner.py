@@ -93,6 +93,77 @@ async def encode_h264(
 
     args += ["-progress", "pipe:1", "-nostats", "-loglevel", "error", str(destination)]
 
+    return await _run_with_progress(args, duration, progress, cancel_check)
+
+
+async def convert_to_mp4(
+    source: Path,
+    destination: Path,
+    progress: Optional[FileProgressCallback] = None,
+    cancel_check: Optional[CancelCheck] = None,
+) -> Optional[str]:
+    """Convert `source` into an `.mp4` container without compressing it.
+
+    First tries a stream copy (remux): the existing video/audio bitstreams are
+    repackaged into MP4 with no re-encoding — no quality loss and roughly the
+    same size. If the codecs cannot live in MP4, falls back to a near-lossless
+    H.264 re-encode (CRF 18), which may grow the file a little.
+
+    Returns ``"remux"`` or ``"reencode"`` on success, or ``None`` on failure.
+    """
+    if not FFMPEG_AVAILABLE:
+        return None
+
+    duration = await probe_duration(source)
+
+    base = [FFMPEG_EXE, "-y", "-i", str(source)]
+    tail = [
+        "-map_metadata",
+        "0",
+        "-movflags",
+        "+faststart",
+        "-progress",
+        "pipe:1",
+        "-nostats",
+        "-loglevel",
+        "error",
+        str(destination),
+    ]
+
+    # 1) Remux — repackage streams as-is (no quality loss, ~same size).
+    remux = base + ["-c", "copy"] + tail
+    if await _run_with_progress(remux, duration, progress, cancel_check):
+        return "remux"
+
+    if cancel_check is not None and cancel_check():
+        return None
+
+    # 2) Fallback — near-lossless re-encode for codecs MP4 can't contain.
+    reencode = base + [
+        "-c:v",
+        "libx264",
+        "-crf",
+        "18",
+        "-preset",
+        "medium",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+    ] + tail
+    if await _run_with_progress(reencode, duration, progress, cancel_check):
+        return "reencode"
+
+    return None
+
+
+async def _run_with_progress(
+    args: list,
+    duration: Optional[float],
+    progress: Optional[FileProgressCallback],
+    cancel_check: Optional[CancelCheck],
+) -> bool:
+    """Run an ffmpeg command, forwarding per-file progress; True on success."""
     process = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.PIPE,

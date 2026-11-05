@@ -1,5 +1,4 @@
 import asyncio
-import shutil
 from pathlib import Path
 from typing import Callable, List, Optional, Set
 
@@ -8,7 +7,11 @@ from photorec.features.renamer.geocoder import Geocoder
 from photorec.features.renamer.name_builder import NameBuilder
 from photorec.shared.image_signature import is_image
 from photorec.shared.media_scanner import MediaScanner
-from photorec.shared.rename_ops import RenameOperation, undo_operations
+from photorec.shared.rename_ops import (
+    RenameOperation,
+    safe_move,
+    undo_operations,
+)
 from photorec.shared.screenshot_detector import is_screenshot
 
 
@@ -75,6 +78,7 @@ class RenamerService:
 
         renamed = 0
         skipped = 0
+        failed = 0
 
         for i, file in enumerate(files, start=1):
             if self._is_cancelled():
@@ -88,14 +92,19 @@ class RenamerService:
             else:
                 planned.add(destination)
 
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(file), str(destination))
-
-                operations.append(
-                    RenameOperation(source=file, target=destination)
-                )
-
-                renamed += 1
+                try:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    safe_move(file, destination)
+                except OSError as error:
+                    # A locked / permission-protected file must not stop the run.
+                    failed += 1
+                    planned.discard(destination)
+                    self._log(f"   SKIPPED (locked/permission): {file} — {error}")
+                else:
+                    operations.append(
+                        RenameOperation(source=file, target=destination)
+                    )
+                    renamed += 1
 
             self._report(i, total)
 
@@ -103,7 +112,7 @@ class RenamerService:
                 self._log(
                     f"Progress: {i}/{total} "
                     f"({i / total * 100:.1f}%) | "
-                    f"renamed={renamed}, skipped={skipped}"
+                    f"renamed={renamed}, skipped={skipped}, failed={failed}"
                 )
 
                 await asyncio.sleep(0)
@@ -112,6 +121,8 @@ class RenamerService:
         self._log("Rename finished")
         self._log(f"Renamed : {renamed}")
         self._log(f"Skipped : {skipped}")
+        if failed:
+            self._log(f"Failed  : {failed}  (could not move — see log)")
 
         return operations
 
@@ -147,6 +158,7 @@ class RenamerService:
         planned: Set[Path] = set()
 
         moved = 0
+        failed = 0
 
         for i, file in enumerate(images, start=1):
             if self._is_cancelled():
@@ -161,15 +173,19 @@ class RenamerService:
                 )
                 planned.add(destination)
 
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(file), str(destination))
-
-                operations.append(
-                    RenameOperation(source=file, target=destination)
-                )
-
-                moved += 1
-                self._log(f"   screenshot: {relative}")
+                try:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    safe_move(file, destination)
+                except OSError as error:
+                    failed += 1
+                    planned.discard(destination)
+                    self._log(f"   SKIPPED (locked/permission): {file} — {error}")
+                else:
+                    operations.append(
+                        RenameOperation(source=file, target=destination)
+                    )
+                    moved += 1
+                    self._log(f"   screenshot: {relative}")
 
             self._report(i, total)
 
@@ -181,6 +197,76 @@ class RenamerService:
         self._log("Screenshot extraction finished")
         self._log(f"Screenshots moved : {moved}  (into {SCREENSHOTS_FOLDER_NAME}/)")
         self._log(f"Photos untouched  : {total - moved}")
+        if failed:
+            self._log(f"Failed            : {failed}  (could not move — see log)")
+
+        return operations
+
+    # ------------------------------------------------------------------
+    # FLATTEN (does not rename anything)
+    # ------------------------------------------------------------------
+
+    async def flatten(self) -> List[RenameOperation]:
+        """Move every media file from nested subfolders into the input root.
+
+        Nothing is renamed — files keep their names. Files already in the root
+        are left alone, and empty folders are NOT deleted. Returns the moves
+        for Undo.
+        """
+        self._log(f"Flattening into: {self._input_folder}")
+
+        files = MediaScanner(str(self._input_folder)).scan()
+        # Only files that live below the root need moving.
+        nested = [f for f in files if f.parent != self._input_folder]
+
+        total = len(nested)
+        self._log(f"Files to move: {total}  (already in root: {len(files) - total})")
+
+        if total == 0:
+            self._log("Nothing to flatten.")
+            return []
+
+        operations: List[RenameOperation] = []
+        planned: Set[Path] = set()
+
+        moved = 0
+        failed = 0
+
+        for i, file in enumerate(nested, start=1):
+            if self._is_cancelled():
+                self._log(f"Cancelled at {i - 1}/{total}.")
+                break
+
+            destination = self._avoid_collision(
+                self._input_folder / file.name,
+                planned,
+            )
+            planned.add(destination)
+
+            try:
+                safe_move(file, destination)
+            except OSError as error:
+                failed += 1
+                planned.discard(destination)
+                self._log(f"   SKIPPED (locked/permission): {file} — {error}")
+            else:
+                operations.append(
+                    RenameOperation(source=file, target=destination)
+                )
+                moved += 1
+
+            self._report(i, total)
+
+            if i % 50 == 0 or i == total:
+                self._log(f"Progress: {i}/{total} | moved={moved}")
+                await asyncio.sleep(0)
+
+        self._log("")
+        self._log("Flatten finished")
+        self._log(f"Moved   : {moved}  (into the input folder)")
+        self._log("Empty folders were left in place.")
+        if failed:
+            self._log(f"Failed  : {failed}  (could not move — see log)")
 
         return operations
 

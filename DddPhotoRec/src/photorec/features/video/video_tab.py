@@ -70,6 +70,12 @@ class VideoCompressorTab:
             on_change=self._on_downscale_changed,
         )
 
+        self._convert_switch = ft.Switch(
+            value=False,
+            active_color=ft.Colors.TEAL_400,
+            on_change=self._on_convert_changed,
+        )
+
         self._threshold_dropdown = self._dropdown(
             "Downscale files larger than",
             _DEFAULT_THRESHOLD_LABEL,
@@ -108,6 +114,12 @@ class VideoCompressorTab:
             color=ft.Colors.PURPLE_300,
             bgcolor=ft.Colors.GREY_800,
             border_radius=6,
+        )
+
+        self._overall_label = ft.Text(
+            "Overall",
+            size=11,
+            color=ft.Colors.GREY_600,
         )
 
         self._overall_progress_bar = ft.ProgressBar(
@@ -224,6 +236,34 @@ class VideoCompressorTab:
                         ],
                     ),
 
+                    ft.Container(height=1, bgcolor=ft.Colors.GREY_800),
+
+                    ft.Row(
+                        spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            self._convert_switch,
+                            ft.Column(
+                                spacing=1,
+                                controls=[
+                                    ft.Text(
+                                        "Convert old formats to MP4 "
+                                        "(no compression)",
+                                        size=13,
+                                        color=ft.Colors.GREY_200,
+                                    ),
+                                    ft.Text(
+                                        "Repackages .avi / .3gp / .wmv … into "
+                                        ".mp4 with no quality loss. Quality & "
+                                        "downscale options are ignored.",
+                                        size=11,
+                                        color=ft.Colors.GREY_500,
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+
                     ft.Row(
                         spacing=10,
                         controls=[
@@ -241,11 +281,7 @@ class VideoCompressorTab:
                                 color=ft.Colors.GREY_600,
                             ),
                             self._file_progress_bar,
-                            ft.Text(
-                                "Overall",
-                                size=11,
-                                color=ft.Colors.GREY_600,
-                            ),
+                            self._overall_label,
                             self._overall_progress_bar,
                         ],
                     ),
@@ -287,6 +323,11 @@ class VideoCompressorTab:
     def _on_downscale_changed(self, _: ft.ControlEvent) -> None:
         self._update_buttons()
 
+    def _on_convert_changed(self, _: ft.ControlEvent) -> None:
+        convert = self._convert_switch.value
+        self._compress_button.text = "Convert to MP4" if convert else "Compress"
+        self._update_buttons()
+
     def _selected_crf(self) -> int:
         return CRF_BY_QUALITY.get(self._quality_dropdown.value, 23)
 
@@ -319,7 +360,10 @@ class VideoCompressorTab:
                 file_progress=self._on_file_progress,
             )
 
-            await service.run()
+            if self._convert_switch.value:
+                await service.run_convert()
+            else:
+                await service.run()
 
         except Exception as error:
             self._add_log(f"ERROR: {error}")
@@ -332,7 +376,11 @@ class VideoCompressorTab:
         self._add_log("Cancellation requested...")
 
     def _on_overall_progress(self, done: int, total: int) -> None:
-        self._overall_progress_bar.value = (done / total) if total else None
+        fraction = (done / total) if total else None
+        self._overall_progress_bar.value = fraction
+        self._overall_label.value = (
+            f"Overall {fraction * 100:.0f}%" if fraction is not None else "Overall"
+        )
         self._page.update()
 
     def _on_file_progress(self, fraction: float) -> None:
@@ -357,19 +405,24 @@ class VideoCompressorTab:
         if running:
             self._file_progress_bar.value = 0
             self._overall_progress_bar.value = 0
+            self._overall_label.value = "Overall 0%"
 
         self._update_buttons()
 
     def _update_buttons(self) -> None:
         ready = bool(self._input_folder and FFMPEG_AVAILABLE)
+        convert = self._convert_switch.value
 
         self._compress_button.disabled = self._running or not ready
         self._cancel_button.disabled = not self._running
         self._select_input_button.disabled = self._running
-        self._quality_dropdown.disabled = self._running
-        self._downscale_switch.disabled = self._running
+        self._convert_switch.disabled = self._running
+
+        # In convert-only mode the compression options don't apply.
+        self._quality_dropdown.disabled = self._running or convert
+        self._downscale_switch.disabled = self._running or convert
         self._threshold_dropdown.disabled = (
-            self._running or not self._downscale_switch.value
+            self._running or convert or not self._downscale_switch.value
         )
 
         self._page.update()

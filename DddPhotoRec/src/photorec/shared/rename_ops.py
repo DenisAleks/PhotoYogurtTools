@@ -1,4 +1,5 @@
 import asyncio
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,68 @@ from typing import Callable, List, Optional
 LogCallback = Callable[[str], None]
 CancelCheck = Callable[[], bool]
 ProgressCallback = Callable[[int, int], None]
+
+
+def _unlock(path: Path) -> None:
+    """Clear a macOS 'locked' (immutable) flag so the file can be moved.
+
+    No-op when there is nothing to clear or on systems without `os.chflags`.
+    """
+    if not hasattr(os, "chflags"):
+        return
+    try:
+        flags = os.stat(path).st_flags
+    except (OSError, AttributeError):
+        return
+    if not flags:
+        return
+    try:
+        os.chflags(path, 0)
+    except OSError:
+        pass
+
+
+def safe_move(source: Path, destination: Path) -> None:
+    """Move a file, forcing past a macOS 'locked' (immutable) flag if present.
+
+    A Finder-locked file (UF_IMMUTABLE) can't be renamed and raises EPERM
+    ("Operation not permitted"). `os.replace` is used first — an atomic,
+    same-filesystem rename that copies no metadata (so it never propagates the
+    lock flag like `shutil.move`'s copy fallback does). On failure we clear the
+    lock and retry; the moved file is left **unlocked**. A cross-filesystem move
+    falls back to copy-then-delete.
+    """
+    try:
+        os.replace(str(source), str(destination))
+        return
+    except OSError as first_error:
+        _unlock(source)
+
+        if destination.exists():
+            _unlock(destination)
+
+        try:
+            os.replace(str(source), str(destination))
+            return
+        except OSError:
+            pass
+
+        # Different filesystem (EXDEV) or still blocked — copy then delete.
+        try:
+            shutil.copy2(str(source), str(destination))
+        except OSError:
+            raise first_error
+
+        if hasattr(os, "chflags"):
+            try:
+                os.chflags(str(destination), 0)
+            except OSError:
+                pass
+
+        try:
+            os.unlink(str(source))
+        except OSError:
+            pass
 
 
 @dataclass(slots=True)
@@ -56,15 +119,19 @@ async def undo_operations(
             failed += 1
             emit(f"Original path occupied, skipped: {operation.source.name}")
         else:
-            operation.source.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(operation.target), str(operation.source))
-            restored += 1
-
-            # Remove the folder we may have created, if it is now empty.
             try:
-                operation.target.parent.rmdir()
-            except OSError:
-                pass
+                operation.source.parent.mkdir(parents=True, exist_ok=True)
+                safe_move(operation.target, operation.source)
+                restored += 1
+            except OSError as error:
+                failed += 1
+                emit(f"Couldn't restore {operation.target.name}: {error}")
+            else:
+                # Remove the folder we may have created, if it is now empty.
+                try:
+                    operation.target.parent.rmdir()
+                except OSError:
+                    pass
 
         if progress is not None:
             progress(i, total)

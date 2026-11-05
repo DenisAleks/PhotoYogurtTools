@@ -146,6 +146,12 @@ class RenamerTab:
             selectable=True,
         )
 
+        self._flatten_switch = ft.Switch(
+            value=False,
+            active_color=ft.Colors.TEAL_400,
+            on_change=self._on_flatten_changed,
+        )
+
         self._rename_button = ft.ElevatedButton(
             text="Rename all",
             disabled=True,
@@ -283,6 +289,32 @@ class RenamerTab:
 
                     ft.Row(
                         spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            self._flatten_switch,
+                            ft.Column(
+                                spacing=1,
+                                controls=[
+                                    ft.Text(
+                                        "Flatten all photo/video files into the "
+                                        "input folder",
+                                        size=13,
+                                        color=ft.Colors.GREY_200,
+                                    ),
+                                    ft.Text(
+                                        "Moves files out of subfolders into the "
+                                        "root — no renaming. Empty folders are "
+                                        "kept.",
+                                        size=11,
+                                        color=ft.Colors.GREY_500,
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+
+                    ft.Row(
+                        spacing=10,
                         controls=[
                             self._rename_button,
                             self._extract_button,
@@ -372,6 +404,16 @@ class RenamerTab:
         self._update_preview()
         self._update_buttons()
 
+    def _on_flatten_changed(self, _: ft.ControlEvent) -> None:
+        flatten = self._flatten_switch.value
+
+        # Flattening never renames, so the pattern controls don't apply.
+        self._preset_dropdown.disabled = flatten
+        self._pattern_field.disabled = flatten
+        self._rename_button.text = "Flatten" if flatten else "Rename all"
+
+        self._update_buttons()
+
     def _sync_preset_dropdown(self) -> None:
         pattern = self._pattern_field.value or ""
 
@@ -427,7 +469,10 @@ class RenamerTab:
                 progress=self._on_progress,
             )
 
-            operations = await service.run()
+            if self._flatten_switch.value:
+                operations = await service.flatten()
+            else:
+                operations = await service.run()
 
             if operations:
                 self._last_operations = operations
@@ -532,10 +577,16 @@ class RenamerTab:
         self._page.update()
 
     def _update_buttons(self) -> None:
-        ready = bool(
-            self._input_folder
-            and (self._pattern_field.value or "").strip()
-        )
+        flatten = self._flatten_switch.value
+
+        # Flattening needs only the input folder; renaming also needs a pattern.
+        if flatten:
+            ready = bool(self._input_folder)
+        else:
+            ready = bool(
+                self._input_folder
+                and (self._pattern_field.value or "").strip()
+            )
 
         self._rename_button.disabled = self._running or not ready
         # Extracting screenshots needs only the input folder (no pattern).
@@ -547,5 +598,6 @@ class RenamerTab:
         )
         self._cancel_button.disabled = not self._running
         self._select_input_button.disabled = self._running
+        self._flatten_switch.disabled = self._running
 
         self._page.update()
